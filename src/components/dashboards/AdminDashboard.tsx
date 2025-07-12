@@ -209,6 +209,21 @@ export const AdminDashboard: React.FC = () => {
 
             if (error) throw error;
             successCount++;
+          } else if (uploadType === 'Clients') { // This is the new part
+            const client = row as any;
+            const { error } = await supabase
+              .from('clients')
+              .insert({
+                  name: client.name,
+                  email: client.email,
+                  phone: client.phone,
+                  address: client.address,
+                  consumption_type: client.consumption_type,
+                  call_frequency: client.call_frequency,
+                  assigned_rep_id: client.assigned_rep_id,
+              });
+            if (error) throw error;
+            successCount++;
           }
         } catch (err: any) {
           errors.push(`Row ${index + 2}: ${err.message}`);
@@ -221,8 +236,11 @@ export const AdminDashboard: React.FC = () => {
         total: jsonData.length,
       });
 
+      // Refresh the appropriate data
       if (uploadType === 'Products') {
         fetchProducts();
+      } else {
+        fetchReps(); // You may want a fetchClients() here instead
       }
     } catch (err: any) {
       setError(err.message || 'Failed to process file');
