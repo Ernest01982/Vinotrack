@@ -9,41 +9,39 @@ const AppContent: React.FC = () => {
   const { user, userProfile, loading } = useAuth();
   const [showForgotPassword, setShowForgotPassword] = useState(false);
 
-  // Show a loading screen while the app is initializing
+  // Initial loading state for the whole application
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-          <p className="text-gray-400">Initializing...</p>
+          <p className="text-gray-400">VinoTracker is Initializing...</p>
         </div>
       </div>
     );
   }
 
-  // If there is no authenticated user, show the login form
+  // If there's no user, direct to authentication
   if (!user) {
-    if (showForgotPassword) {
-      return <ForgotPasswordForm onBack={() => setShowForgotPassword(false)} />;
-    }
-    return <LoginForm onForgotPassword={() => setShowForgotPassword(true)} />;
+    return showForgotPassword
+      ? <ForgotPasswordForm onBack={() => setShowForgotPassword(false)} />
+      : <LoginForm onForgotPassword={() => setShowForgotPassword(true)} />;
   }
 
-  // If we have a user, but no profile yet, show a profile loading screen.
-  // This is what you see AFTER a successful login.
+  // If user is logged in, but we are still waiting for the profile
   if (!userProfile) {
     return (
-       <div className="min-h-screen bg-gray-900 flex items-center justify-center text-center">
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center text-center">
         <div>
            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-          <h2 className="text-2xl font-bold text-gray-300 mb-4">Loading Profile...</h2>
-          <p className="text-gray-500">If this screen persists, there is an issue with the database.</p>
+          <h2 className="text-2xl font-bold text-gray-300 mb-4">Loading User Profile...</h2>
+          <p className="text-gray-500">This should only take a moment.</p>
         </div>
       </div>
     );
   }
 
-  // If the user and profile are loaded, show the correct dashboard
+  // User and profile are loaded, show the correct dashboard
   return userProfile.role === 'Admin' ? <AdminDashboard /> : <RepDashboard />;
 };
 
