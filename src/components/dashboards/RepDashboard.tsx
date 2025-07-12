@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Users, 
   MapPin, 
@@ -18,47 +18,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ActiveVisitScreen } from './ActiveVisitScreen';
 import { Button } from '../ui/Button';
 
-interface Client {
-  id: string;
-  name: string;
-  email: string;
-  phone?: string;
-  address?: string;
-  consumption_type: 'on-consumption' | 'off-consumption';
-  call_frequency: number;
-  assigned_rep_id: string;
-  created_at: string;
-}
-
-interface Visit {
-  id: string;
-  client_id: string;
-  rep_id: string;
-  start_time: string;
-  end_time?: string;
-  latitude?: number;
-  longitude?: number;
-  notes?: string;
-  created_at: string;
-  clients?: Client;
-}
-
-interface Product {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-}
-
-interface Order {
-  id: string;
-  client_id: string;
-  rep_id: string;
-  visit_id?: string;
-  total_amount: number;
-  items: any[];
-  created_at: string;
-}
+// ... (interfaces remain the same)
 
 const RepDashboard: React.FC = () => {
   const { userProfile } = useAuth();
@@ -91,14 +51,59 @@ const RepDashboard: React.FC = () => {
    { name: 'Revenue This Month', value: `R ${orders.reduce((sum, order) => sum + Number(order.total_amount), 0).toLocaleString()}`, change: '+15%', icon: TrendingUp },
   ];
 
-  useEffect(() => {
-    // In testing mode, we don't have a real userProfile, so we'll simulate data
-    fetchData();
-    checkForActiveVisit();
+  const fetchData = useCallback(async () => {
+    if (!userProfile?.id) {
+      setClients([]);
+      setVisits([]);
+      setOrders([]);
+      setProducts([]);
+      setLoading(false);
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const { data: clientsData, error: clientsError } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('assigned_rep_id', userProfile.id);
+
+      if (clientsError) throw clientsError;
+      setClients(clientsData || []);
+
+      const { data: visitsData, error: visitsError } = await supabase
+        .from('visits')
+        .select('*, clients(*)')
+        .eq('rep_id', userProfile.id)
+        .order('created_at', { ascending: false });
+
+      if (visitsError) throw visitsError;
+      setVisits(visitsData || []);
+
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('rep_id', userProfile.id)
+        .order('created_at', { ascending: false });
+
+      if (ordersError) throw ordersError;
+      setOrders(ordersData || []);
+
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select('*');
+
+      if (productsError) throw productsError;
+      setProducts(productsData || []);
+
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+    }
   }, [userProfile?.id]);
 
-  const checkForActiveVisit = async () => {
-    // Skip active visit check in testing mode since we don't have real user data
+  const checkForActiveVisit = useCallback(async () => {
     if (!userProfile?.id) {
       setActiveVisit(null);
       setActiveClient(null);
@@ -117,46 +122,22 @@ const RepDashboard: React.FC = () => {
       if (activeVisits && activeVisits.length > 0) {
         const visit = activeVisits[0];
         setActiveVisit(visit);
-        setActiveClient(visit.clients);
+        setActiveClient(visit.clients as Client);
+      } else {
+        setActiveVisit(null);
+        setActiveClient(null);
       }
     } catch (error) {
       console.error('Error checking for active visit:', error);
     }
-  };
+  }, [userProfile?.id]);
 
-  const fetchData = async () => {
-    // In testing mode, provide mock data when userProfile is not available
-    if (!userProfile?.id) {
-      setClients([]);
-      setVisits([]);
-      setOrders([]);
-      setProducts([]);
-      setLoading(false);
-      return;
-    }
-    
-    setLoading(true);
-    try {
-      // Fetch clients
-      const { data: clientsData, error: clientsError } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('assigned_rep_id', userProfile.id);
-
-      if (clientsError) throw clientsError;
-      setClients(clientsData || []);
-
-      // Fetch visits
-      const { data: visitsData, error: visitsError } = await supabase
-        .from('visits')
-        .select('*, clients(*)')
-        .eq('rep_id', userProfile.id)
-        .order('created_at', { ascending: false });
-
-      if (visitsError) throw visitsError;
-      setVisits(visitsData || []);
-
-      // Fetch orders
+  useEffect(() => {
+    fetchData();
+    checkForActiveVisit();
+  }, [fetchData, checkForActiveVisit]);
+  
+  // ... (The rest of the RepDashboard.tsx file remains the same)
       const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
         .select('*')
