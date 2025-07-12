@@ -18,7 +18,47 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ActiveVisitScreen } from './ActiveVisitScreen';
 import { Button } from '../ui/Button';
 
-// ... (interfaces remain the same)
+interface Client {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  address?: string;
+  consumption_type: 'on-consumption' | 'off-consumption';
+  call_frequency: number;
+  assigned_rep_id: string;
+  created_at: string;
+}
+
+interface Visit {
+  id: string;
+  client_id: string;
+  rep_id: string;
+  start_time: string;
+  end_time?: string;
+  latitude?: number;
+  longitude?: number;
+  notes?: string;
+  created_at: string;
+  clients?: Client;
+}
+
+interface Product {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+}
+
+interface Order {
+  id: string;
+  client_id: string;
+  rep_id: string;
+  visit_id?: string;
+  total_amount: number;
+  items: any[];
+  created_at: string;
+}
 
 const RepDashboard: React.FC = () => {
   const { userProfile } = useAuth();
@@ -63,6 +103,7 @@ const RepDashboard: React.FC = () => {
     
     setLoading(true);
     try {
+      // Fetch clients
       const { data: clientsData, error: clientsError } = await supabase
         .from('clients')
         .select('*')
@@ -71,6 +112,7 @@ const RepDashboard: React.FC = () => {
       if (clientsError) throw clientsError;
       setClients(clientsData || []);
 
+      // Fetch visits
       const { data: visitsData, error: visitsError } = await supabase
         .from('visits')
         .select('*, clients(*)')
@@ -80,6 +122,7 @@ const RepDashboard: React.FC = () => {
       if (visitsError) throw visitsError;
       setVisits(visitsData || []);
 
+      // Fetch orders
       const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
         .select('*')
@@ -89,6 +132,7 @@ const RepDashboard: React.FC = () => {
       if (ordersError) throw ordersError;
       setOrders(ordersData || []);
 
+      // Fetch products
       const { data: productsData, error: productsError } = await supabase
         .from('products')
         .select('*');
@@ -136,42 +180,16 @@ const RepDashboard: React.FC = () => {
     fetchData();
     checkForActiveVisit();
   }, [fetchData, checkForActiveVisit]);
-  
-  // ... (The rest of the RepDashboard.tsx file remains the same)
-      const { data: ordersData, error: ordersError } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('rep_id', userProfile.id)
-        .order('created_at', { ascending: false });
-
-      if (ordersError) throw ordersError;
-      setOrders(ordersData || []);
-
-      // Fetch products
-      const { data: productsData, error: productsError } = await supabase
-        .from('products')
-        .select('*');
-
-      if (productsError) throw productsError;
-      setProducts(productsData || []);
-
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const startVisit = async (client: Client) => {
     if (!userProfile?.id) {
-      alert('Cannot start visit in testing mode - user profile not available');
+      alert('Cannot start visit - user profile not available');
       return;
     }
     
     try {
       let latitude, longitude;
       
-      // Try to get current location
       if (navigator.geolocation) {
         try {
           const position = await new Promise<GeolocationPosition>((resolve, reject) => {
@@ -284,7 +302,6 @@ const RepDashboard: React.FC = () => {
       errors.email = 'Please enter a valid email address';
     }
     
-    // Check for duplicate email
     if (clients.some(client => client.email.toLowerCase() === newClientForm.email.toLowerCase())) {
       errors.email = 'A client with this email already exists';
     }
@@ -299,7 +316,7 @@ const RepDashboard: React.FC = () => {
     if (!validateForm()) return;
     
     if (!userProfile?.id) {
-      alert('Cannot add client in testing mode - user profile not available');
+      alert('Cannot add client - user profile not available');
       return;
     }
     
@@ -322,7 +339,6 @@ const RepDashboard: React.FC = () => {
 
       if (error) throw error;
 
-      // Reset form and close modal
       setNewClientForm({
         name: '',
         email: '',
@@ -334,7 +350,6 @@ const RepDashboard: React.FC = () => {
       setFormErrors({});
       setShowAddClientModal(false);
       
-      // Refresh clients list
       fetchData();
       
     } catch (error) {
@@ -345,7 +360,6 @@ const RepDashboard: React.FC = () => {
     }
   };
 
-  // If there's an active visit, show the active visit screen
   if (activeVisit && activeClient) {
     return (
       <ActiveVisitScreen
@@ -385,7 +399,6 @@ const RepDashboard: React.FC = () => {
 
       {/* Priority Clients and Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Priority Clients */}
         <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
           <h3 className="text-lg font-semibold text-white mb-4">Priority Clients</h3>
           <div className="space-y-3">
@@ -410,7 +423,6 @@ const RepDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Recent Activity */}
         <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
           <h3 className="text-lg font-semibold text-white mb-4">Recent Activity</h3>
           <div className="space-y-3">
@@ -475,7 +487,6 @@ const RepDashboard: React.FC = () => {
 
   const renderClients = () => (
     <>
-      {/* Search and Filter Bar */}
       <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-6">
         <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
           <div className="flex-1 relative">
@@ -515,7 +526,6 @@ const RepDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Clients Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredClients.map((client) => {
           const priority = getClientPriority(client);
