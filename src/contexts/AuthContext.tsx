@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase, UserProfile } from '../lib/supabase';
 
@@ -8,8 +8,8 @@ interface AuthContextType {
   session: Session | null;
   loading: boolean;
   signOut: () => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
-  // Add other methods if they are part of your context
+  signIn: (email: string, password: string) => Promise<any>;
+  resetPassword: (email: string) => Promise<any>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -41,7 +41,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('id', currentUser.id)
         .single();
 
-      if (error && error.code !== 'PGRST116') { // PGRST116 means "No rows found"
+      if (error && error.code !== 'PGRST116') {
         throw error;
       }
       setUserProfile(data || null);
@@ -76,14 +76,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [fetchUserProfile]);
 
-  const value = {
+  const signOut = useCallback(() => supabase.auth.signOut(), []);
+  const signIn = useCallback((email: string, password: string) => supabase.auth.signInWithPassword({ email, password }), []);
+  const resetPassword = useCallback((email: string) => supabase.auth.resetPasswordForEmail(email), []);
+
+  const value = useMemo(() => ({
     user,
     userProfile,
     session,
     loading,
-    signOut: () => supabase.auth.signOut(),
-    signIn: (email:string,password:string) => supabase.auth.signInWithPassword({email,password}),
-  };
+    signOut,
+    signIn,
+    resetPassword,
+  }), [user, userProfile, session, loading, signOut, signIn, resetPassword]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
