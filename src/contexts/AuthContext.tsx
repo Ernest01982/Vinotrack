@@ -41,7 +41,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('id', currentUser.id)
         .single();
 
-      if (error && error.code !== 'PGRST116') { // PGRST116: No rows found
+      if (error && error.code !== 'PGRST116') {
         throw error;
       }
       setUserProfile(data || null);
@@ -53,20 +53,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     setLoading(true);
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      await fetchUserProfile(currentUser);
-      setLoading(false);
-    });
+    
+    supabase.auth.getSession()
+      .then(async ({ data: { session } }) => {
+        setSession(session);
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+        await fetchUserProfile(currentUser);
+      })
+      .catch((error) => console.error("Error during initial session fetch:", error))
+      .finally(() => {
+        setLoading(false);
+      });
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
         const currentUser = session?.user ?? null;
         setUser(currentUser);
-        await fetchUserProfile(currentUser);
+        if (currentUser) {
+          await fetchUserProfile(currentUser);
+        }
         setLoading(false);
       }
     );
