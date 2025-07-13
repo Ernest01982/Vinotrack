@@ -22,12 +22,14 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onForgotPassword }) => {
     setError('');
     setLoading(true);
     
-    console.log('Starting login process for:', email);
-
     try {
-      await signIn(email, password);
-      console.log('Login successful, waiting for profile...');
-      // Auth context will handle profile fetching and dashboard routing
+      const { error: signInError } = await signIn(email, password);
+
+      if (signInError) {
+        throw signInError;
+      }
+      // On successful sign-in, the AuthContext's onAuthStateChange
+      // will handle fetching the user profile and routing.
     } catch (err: any) {
       console.error('Login error:', err);
       if (err.message.includes('Invalid login credentials')) {
