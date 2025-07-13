@@ -34,41 +34,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', currentUser.id)
-        .single();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', currentUser.id)
+      .single();
 
-      if (error && error.code !== 'PGRST116') { // PGRST116: No rows found
-        throw error;
-      }
-      setUserProfile(data || null);
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-      setUserProfile(null);
+    if (error && error.code !== 'PGRST116') { // PGRST116: No rows found
+      throw error;
     }
+    setUserProfile(data || null);
   }, []);
 
   useEffect(() => {
-    // This effect now uses the recommended pattern for Supabase auth.
-    // It relies solely on onAuthStateChange, which handles the initial session
-    // as well as any subsequent changes.
-    
     setLoading(true);
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+    // This function fetches the initial session and user data.
+    const getInitialSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
         setSession(session);
         const currentUser = session?.user ?? null;
         setUser(currentUser);
-        
-        // Fetch profile only if there is a user
         await fetchUserProfile(currentUser);
-
-        // The initial auth check is complete, so we can stop loading.
+      } catch (error) {
+        console.error("Error fetching initial session:", error);
+      } finally {
+        // This is guaranteed to run and will resolve the loading screen issue.
         setLoading(false);
+      }
+    };
+
+    getInitialSession();
+
+    // This listener handles any subsequent changes in auth state (e.g., login, logout).
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (_event, newSession) => {
+        setSession(newSession);
+        const currentUser = newSession?.user ?? null;
+        setUser(currentUser);
+        
+        // We still need to fetch the profile when the user changes.
+        // We don't need to manage the loading state here as this handles subsequent changes.
+        await fetchUserProfile(currentUser);
       }
     );
 
