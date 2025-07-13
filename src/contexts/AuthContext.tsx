@@ -100,9 +100,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [fetchUserProfile]);
 
   const signOut = useCallback(async () => {
-    console.log('📋 fetchUserProfile: Starting for user:', currentUser ? currentUser.email : 'null');
+    // FIX: Changed 'currentUser' to 'user' which is available in this scope.
+    console.log('📋 signOut: Starting for user:', user ? user.email : 'null');
     await supabase.auth.signOut();
-  }, []);
+  }, [user]); // Added 'user' to the dependency array
 
   const signIn = useCallback(async (email: string, password: string) => {
     return supabase.auth.signInWithPassword({ email, password });
