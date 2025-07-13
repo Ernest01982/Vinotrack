@@ -3,6 +3,9 @@ import { ArrowLeft, User, Mail, Phone, MapPin, Calendar, Clock, Save, FileText, 
 import { Button } from '../ui/Button';
 import { supabase } from '../../lib/supabase';
 import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+
+// ... (The rest of the component remains the same)
 
 // Extend jsPDF type to include autoTable
 declare module 'jspdf' {
