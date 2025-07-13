@@ -43,8 +43,7 @@ interface Visit {
   clients?: Client;
 }
 
-interface Produc
-)t {
+interface Product {
   id: string;
   name: string;
   description: string;
