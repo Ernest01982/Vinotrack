@@ -20,13 +20,26 @@ If you're experiencing conflicts from previous migration attempts:
    - Copy and paste `supabase/migrations/consolidated_schema_setup.sql`
    - Click "Run"
 
-## Default Admin Credentials
+## Admin User Setup
 
-After running the migration, you can log in with:
-- **Email**: `ernestreyneke@gmail.com`
-- **Password**: `Admin123`
+After running the migration, you need to create your first admin user:
 
-⚠️ **IMPORTANT**: Change these credentials immediately after first login!
+### Option 1: Through Supabase Dashboard (Recommended)
+1. Go to your Supabase Dashboard → Authentication → Users
+2. Click "Add User" 
+3. Enter your admin email and secure password
+4. After creating the user, the `handle_new_user` trigger will automatically create a profile with 'Rep' role
+5. Manually update the role to 'Admin' in the profiles table:
+   ```sql
+   UPDATE profiles SET role = 'Admin' WHERE email = 'your-admin@email.com';
+   ```
+
+### Option 2: Modify the Migration (Advanced)
+1. Edit the `consolidated_schema_setup.sql` file
+2. Uncomment and modify the admin user creation section with your secure credentials
+3. Run the migration
+
+⚠️ **SECURITY**: Never use default credentials in production!
 
 ## What the Migration Creates
 

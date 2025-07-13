@@ -79,10 +79,9 @@ npm run build
 
 ### 4. Default Admin Access
 
-**Email**: ernestreyneke@gmail.com  
-**Password**: Admin123
+After running the database migration, you can create your first admin user through the Supabase Auth interface or by running the provided SQL migration which creates a default admin account.
 
-*Change these credentials immediately after first login*
+⚠️ **IMPORTANT**: Change default credentials immediately after first login for security.
 
 ## 📊 Database Schema
 
@@ -152,7 +151,7 @@ The application is ready for production deployment on:
 - Any static hosting service
 
 ### Production Checklist
-- [ ] Update default admin credentials
+- [ ] Create secure admin credentials
 - [ ] Configure custom domain
 - [ ] Set up SSL certificate
 - [ ] Configure environment variables
