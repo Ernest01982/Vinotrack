@@ -166,31 +166,7 @@ export const AdminDashboard: React.FC = () => {
                 fetchActivityLogs();
             }
         } catch (err: any) {
-            // Enhanced error handling with specific messages
-            let errorMessage = 'Failed to invite user';
-            
-            if (err.message) {
-                if (err.message.includes('User already registered')) {
-                    errorMessage = `A user with email ${inviteForm.email} already exists. Please use a different email address.`;
-                } else if (err.message.includes('Invalid email')) {
-                    errorMessage = 'Please enter a valid email address.';
-                } else if (err.message.includes('Password should be at least')) {
-                    errorMessage = 'Password must be at least 6 characters long and contain a mix of letters and numbers.';
-                } else if (err.message.includes('Email rate limit exceeded')) {
-                    errorMessage = 'Too many signup attempts. Please wait a few minutes before trying again.';
-                } else if (err.message.includes('Signup is disabled')) {
-                    errorMessage = 'User registration is currently disabled. Please contact your system administrator.';
-                } else if (err.message.includes('network') || err.message.includes('fetch')) {
-                    errorMessage = 'Network error. Please check your internet connection and try again.';
-                } else if (err.message.includes('Database error') || err.message.includes('relation')) {
-                    errorMessage = 'Database configuration error. Please contact technical support.';
-                } else {
-                    errorMessage = `Error: ${err.message}`;
-                }
-            }
-            
-            setError(errorMessage);
-            console.error('Invite user error:', err);
+            setError(err.message || 'Failed to invite user');
         } finally {
             setInviteLoading(false);
         }
@@ -199,23 +175,8 @@ export const AdminDashboard: React.FC = () => {
     const handleAddProduct = async (e: React.FormEvent) => {
         e.preventDefault();
         setProductLoading(true);
-        setError('');
-        setSuccess('');
-        
         try {
-            // Enhanced validation with specific messages
-            if (!productForm.name.trim()) {
-                throw new Error('Product name is required and cannot be empty.');
-            }
-            if (!productForm.description.trim()) {
-                throw new Error('Product description is required and cannot be empty.');
-            }
-            if (!productForm.price || parseFloat(productForm.price) <= 0) {
-                throw new Error('Product price must be a positive number greater than 0.');
-            }
-            if (parseFloat(productForm.price) > 999999.99) {
-                throw new Error('Product price cannot exceed R999,999.99.');
-            }
+            if (!productForm.name.trim() || !productForm.description.trim() || !productForm.price) throw new Error('All product fields are required.');
             
             const { error } = await supabase.from('products').insert({
                 name: productForm.name,
@@ -232,31 +193,7 @@ export const AdminDashboard: React.FC = () => {
             await supabase.from('activity_log').insert({ type: 'PRODUCT_ADDED', message: `Added product: ${productForm.name}` });
             fetchActivityLogs();
         } catch (err: any) {
-            // Enhanced error handling for product creation
-            let errorMessage = 'Failed to add product';
-            
-            if (err.message) {
-                if (err.message.includes('duplicate key') || err.message.includes('unique constraint')) {
-                    errorMessage = `A product named "${productForm.name}" already exists. Please choose a different name.`;
-                } else if (err.message.includes('invalid input syntax')) {
-                    errorMessage = 'Invalid price format. Please enter a valid number (e.g., 25.99).';
-                } else if (err.message.includes('value too long')) {
-                    errorMessage = 'Product name or description is too long. Please shorten your text.';
-                } else if (err.message.includes('permission denied') || err.message.includes('RLS')) {
-                    errorMessage = 'You do not have permission to add products. Please contact your administrator.';
-                } else if (err.message.includes('network') || err.message.includes('fetch')) {
-                    errorMessage = 'Network error. Please check your internet connection and try again.';
-                } else if (err.message.includes('Product name is required') || 
-                          err.message.includes('Product description is required') || 
-                          err.message.includes('Product price must be')) {
-                    errorMessage = err.message; // Use our custom validation messages
-                } else {
-                    errorMessage = `Error adding product: ${err.message}`;
-                }
-            }
-            
-            setError(errorMessage);
-            console.error('Add product error:', err);
+            setError(err.message || 'Failed to add product');
         } finally {
             setProductLoading(false);
         }
@@ -273,21 +210,10 @@ export const AdminDashboard: React.FC = () => {
         try {
             const data = await uploadFile.arrayBuffer();
             const workbook = XLSX.read(data);
-            
-            if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-                throw new Error('The uploaded file appears to be empty or corrupted. Please check your file and try again.');
-            }
-            
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-            if (jsonData.length === 0) {
-                throw new Error('The uploaded file contains no data rows. Please ensure your file has data below the header row.');
-            }
-            
-            if (jsonData.length > 1000) {
-                throw new Error(`File contains ${jsonData.length} rows. Please limit uploads to 1000 rows or fewer for optimal performance.`);
-            }
+            if (jsonData.length === 0) throw new Error('The uploaded file is empty or invalid.');
 
             let successCount = 0;
             const errors: string[] = [];
@@ -296,22 +222,12 @@ export const AdminDashboard: React.FC = () => {
                 try {
                     if (uploadType === 'Products') {
                         const product = row as any;
-                        if (!product.name || !product.description || product.price == null) {
-                            throw new Error("Missing required fields: 'name', 'description', or 'price'");
-                        }
-                        if (typeof product.price !== 'number' && isNaN(parseFloat(product.price))) {
-                            throw new Error("Price must be a valid number");
-                        }
+                        if (!product.name || !product.description || product.price == null) throw new Error("Row is missing 'name', 'description', or 'price'.");
                         const { error: insertError } = await supabase.from('products').insert({ name: String(product.name), description: String(product.description), price: parseFloat(product.price) });
                         if (insertError) throw insertError;
                     } else if (uploadType === 'Clients') {
                         const client = row as any;
-                        if (!client.name || !client.email || !client.assigned_rep_id) {
-                            throw new Error("Missing required fields: 'name', 'email', or 'assigned_rep_id'");
-                        }
-                        if (!client.email.includes('@')) {
-                            throw new Error("Invalid email format");
-                        }
+                        if (!client.name || !client.email || !client.assigned_rep_id) throw new Error("Row is missing 'name', 'email', or 'assigned_rep_id'.");
                         const { error: insertError } = await supabase.from('clients').insert({
                             name: String(client.name),
                             email: String(client.email),
@@ -325,17 +241,7 @@ export const AdminDashboard: React.FC = () => {
                     }
                     successCount++;
                 } catch (err: any) {
-                    let rowError = `Row ${index + 2}: `;
-                    if (err.message.includes('duplicate key')) {
-                        rowError += uploadType === 'Products' ? 
-                            `Product name already exists` : 
-                            `Email address already exists`;
-                    } else if (err.message.includes('foreign key')) {
-                        rowError += `Invalid assigned_rep_id - representative not found`;
-                    } else {
-                        rowError += err.message;
-                    }
-                    errors.push(rowError);
+                    errors.push(`Row ${index + 2}: ${err.message}`);
                 }
             }
 
@@ -344,27 +250,7 @@ export const AdminDashboard: React.FC = () => {
             // You might want to fetch clients here if you implement a client list view
             
         } catch (err: any) {
-            // Enhanced error handling for bulk upload
-            let errorMessage = 'Failed to process file';
-            
-            if (err.message) {
-                if (err.message.includes('not a valid zip file') || err.message.includes('corrupted')) {
-                    errorMessage = 'The uploaded file is corrupted or not a valid Excel file. Please try saving and re-uploading your file.';
-                } else if (err.message.includes('permission denied')) {
-                    errorMessage = 'You do not have permission to upload data. Please contact your administrator.';
-                } else if (err.message.includes('network') || err.message.includes('fetch')) {
-                    errorMessage = 'Network error during upload. Please check your connection and try again.';
-                } else if (err.message.includes('file contains') || 
-                          err.message.includes('uploaded file') || 
-                          err.message.includes('limit uploads')) {
-                    errorMessage = err.message; // Use our custom validation messages
-                } else {
-                    errorMessage = `Upload error: ${err.message}`;
-                }
-            }
-            
-            setError(errorMessage);
-            console.error('Bulk upload error:', err);
+            setError(err.message || 'Failed to process file');
         } finally {
             setUploadLoading(false);
             setUploadFile(null);
@@ -376,18 +262,17 @@ export const AdminDashboard: React.FC = () => {
     const fetchReports = async () => {
         setReportsLoading(true);
         setError('');
-        
         try {
-            const [clientsRes, productsRes, visitsRes] = await Promise.all([
-                supabase.from('clients').select('id, consumption_type', { count: 'exact' }),
-                supabase.from('products').select('id, created_at', { count: 'exact' }),
-                supabase.from('visits').select('id, start_time, end_time, rep_id, profiles!visits_rep_id_fkey(full_name)')
-            ]);
-
-            // Check for errors in any of the queries
+            // Fetch data sequentially to reduce load on the database and prevent timeouts
+            const clientsRes = await supabase.from('clients').select('id, consumption_type', { count: 'exact' });
             if (clientsRes.error) throw new Error(`Failed to fetch client data: ${clientsRes.error.message}`);
+
+            const productsRes = await supabase.from('products').select('id, created_at', { count: 'exact' });
             if (productsRes.error) throw new Error(`Failed to fetch product data: ${productsRes.error.message}`);
+
+            const visitsRes = await supabase.from('visits').select('id, start_time, end_time, rep_id, profiles!visits_rep_id_fkey(full_name)');
             if (visitsRes.error) throw new Error(`Failed to fetch visit data: ${visitsRes.error.message}`);
+
             const thirtyDaysAgo = new Date();
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -425,24 +310,8 @@ export const AdminDashboard: React.FC = () => {
                     avg_duration_minutes: stat.total_visits > 0 ? Math.round(stat.total_duration / stat.total_visits / 60000) : 0
                 }))
             });
-        } catch (err) {
-            // Enhanced error handling for reports
-            let errorMessage = 'Failed to generate reports';
-            
-            if (err.message) {
-                if (err.message.includes('permission denied') || err.message.includes('RLS')) {
-                    errorMessage = 'You do not have permission to view reports. Please contact your administrator.';
-                } else if (err.message.includes('network') || err.message.includes('fetch')) {
-                    errorMessage = 'Network error while loading reports. Please check your connection and try again.';
-                } else if (err.message.includes('Failed to fetch')) {
-                    errorMessage = err.message; // Use our specific fetch error messages
-                } else {
-                    errorMessage = `Reports error: ${err.message}`;
-                }
-            }
-            
-            setError(errorMessage);
-            console.error('Fetch reports error:', err);
+        } catch (err: any) {
+            setError(err.message || 'Failed to fetch reports');
         } finally {
             setReportsLoading(false);
         }
