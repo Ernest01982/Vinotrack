@@ -41,42 +41,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .single();
 
     if (error && error.code !== 'PGRST116') { // PGRST116: No rows found
-      throw error;
+      console.error("Error fetching user profile:", error);
+      // Even if profile fetch fails, we should not throw an error that stops the app
+      setUserProfile(null); 
+    } else {
+      setUserProfile(data || null);
     }
-    setUserProfile(data || null);
   }, []);
 
   useEffect(() => {
-    setLoading(true);
-
-    // This function fetches the initial session and user data.
-    const getInitialSession = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        setSession(session);
-        const currentUser = session?.user ?? null;
-        setUser(currentUser);
-        await fetchUserProfile(currentUser);
-      } catch (error) {
-        console.error("Error fetching initial session:", error);
-      } finally {
-        // This is guaranteed to run and will resolve the loading screen issue.
-        setLoading(false);
-      }
-    };
-
-    getInitialSession();
-
-    // This listener handles any subsequent changes in auth state (e.g., login, logout).
+    // This is the most robust way to handle auth state.
+    // It correctly handles the initial state and any subsequent changes.
     const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
-        setSession(newSession);
-        const currentUser = newSession?.user ?? null;
-        setUser(currentUser);
-        
-        // We still need to fetch the profile when the user changes.
-        // We don't need to manage the loading state here as this handles subsequent changes.
-        await fetchUserProfile(currentUser);
+      async (_event, session) => {
+        try {
+          setSession(session);
+          const currentUser = session?.user ?? null;
+          setUser(currentUser);
+          await fetchUserProfile(currentUser);
+        } catch (e) {
+            console.error("Error in onAuthStateChange handler", e)
+        } finally {
+            // This is the key fix: setLoading(false) is called here,
+            // after the initial auth state has been processed.
+            setLoading(false);
+        }
       }
     );
 
