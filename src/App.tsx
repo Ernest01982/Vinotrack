@@ -15,7 +15,10 @@ const AppContent: React.FC = () => {
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-          <p className="text-gray-400">VinoTracker is Initializing...</p>
+          <div className="space-y-2">
+            <p className="text-white text-lg font-medium">VinoTracker</p>
+            <p className="text-gray-400">Initializing application...</p>
+          </div>
         </div>
       </div>
     );
@@ -33,9 +36,11 @@ const AppContent: React.FC = () => {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center text-center">
         <div>
-           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-          <h2 className="text-2xl font-bold text-gray-300 mb-4">Loading User Profile...</h2>
-          <p className="text-gray-500">This should only take a moment.</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold text-white">Loading Profile</h2>
+            <p className="text-gray-400">Setting up your dashboard...</p>
+          </div>
         </div>
       </div>
     );

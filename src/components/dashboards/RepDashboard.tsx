@@ -183,9 +183,18 @@ const RepDashboard: React.FC = () => {
 
   const startVisit = async (client: Client) => {
     if (!userProfile?.id) {
-      alert('Cannot start visit - user profile not available');
+      setError('Cannot start visit - user profile not available');
       return;
     }
+
+    // Check if there's already an active visit
+    if (activeVisit) {
+      setError('You already have an active visit. Please end the current visit before starting a new one.');
+      return;
+    }
+    
+    setLoading(true);
+    setError('');
     
     try {
       let latitude, longitude;
@@ -200,7 +209,7 @@ const RepDashboard: React.FC = () => {
           });
           latitude = position.coords.latitude;
           longitude = position.coords.longitude;
-        } catch (geoError) {
+        } catch (geoError: any) {
           console.warn('Could not get location:', geoError);
         }
       }
@@ -221,14 +230,23 @@ const RepDashboard: React.FC = () => {
 
       setActiveVisit(visit);
       setActiveClient(client);
+      
+      // Refresh data to update visit counts
+      fetchData();
     } catch (error) {
+      setError('Failed to start visit. Please try again.');
       console.error('Error starting visit:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
   const endVisit = async () => {
     if (!activeVisit) return;
 
+    setLoading(true);
+    setError('');
+    
     try {
       const { error } = await supabase
         .from('visits')
@@ -241,7 +259,10 @@ const RepDashboard: React.FC = () => {
       setActiveClient(null);
       fetchData(); // Refresh data
     } catch (error) {
+      setError('Failed to end visit. Please try again.');
       console.error('Error ending visit:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -316,7 +337,7 @@ const RepDashboard: React.FC = () => {
     if (!validateForm()) return;
     
     if (!userProfile?.id) {
-      alert('Cannot add client - user profile not available');
+      setFormErrors({ submit: 'Cannot add client - user profile not available' });
       return;
     }
     
@@ -376,6 +397,18 @@ const RepDashboard: React.FC = () => {
 
   const renderOverview = () => (
     <>
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-900 border border-red-700 text-red-100 px-4 py-3 rounded-lg mb-6">
+          <div className="flex items-center">
+            <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            {error}
+          </div>
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {stats.map((stat) => {
@@ -413,10 +446,10 @@ const RepDashboard: React.FC = () => {
                   </div>
                   <Button
                     onClick={() => startVisit(client)}
-                    disabled={!!activeVisit}
-                    className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 text-sm"
+                    disabled={!!activeVisit || loading}
+                    } ${!!activeVisit || loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    Visit
+                    {loading ? 'Starting...' : 'Start Visit'}
                   </Button>
                 </div>
               ))}
@@ -455,13 +488,17 @@ const RepDashboard: React.FC = () => {
           <Button
             onClick={() => {
               const nextClient = getNextScheduledClient();
-              if (nextClient) startVisit(nextClient);
+              if (nextClient) {
+                startVisit(nextClient);
+              } else {
+                setError('No clients available for visits');
+              }
             }}
-            disabled={!!activeVisit || clients.length === 0}
+            disabled={!!activeVisit || clients.length === 0 || loading}
             className="bg-purple-600 hover:bg-purple-700 text-white p-4 rounded-lg flex items-center space-x-2 transition-all duration-200 hover:scale-105"
           >
             <Clock className="h-5 w-5" />
-            <span>Next Scheduled Visit</span>
+            <span>{loading ? 'Starting...' : 'Next Scheduled Visit'}</span>
           </Button>
           
           <Button
@@ -475,10 +512,10 @@ const RepDashboard: React.FC = () => {
           <Button
             onClick={fetchData}
             disabled={loading}
-            className="bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-lg flex items-center space-x-2 transition-all duration-200 hover:scale-105"
+            className="bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-lg flex items-center space-x-2 transition-all duration-200 hover:scale-105 disabled:opacity-50"
           >
             <TrendingUp className="h-5 w-5" />
-            <span>Refresh Data</span>
+            <span>{loading ? 'Refreshing...' : 'Refresh Data'}</span>
           </Button>
         </div>
       </div>
@@ -669,7 +706,10 @@ const RepDashboard: React.FC = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white">Loading...</div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-gray-400">Loading dashboard...</p>
+        </div>
       </div>
     );
   }

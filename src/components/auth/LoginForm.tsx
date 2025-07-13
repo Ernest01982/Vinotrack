@@ -23,6 +23,14 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onForgotPassword }) => {
     setLoading(true);
     
     try {
+      // Basic validation
+      if (!email.trim()) {
+        throw new Error('Email is required');
+      }
+      if (!password.trim()) {
+        throw new Error('Password is required');
+      }
+
       const { error: signInError } = await signIn(email, password);
 
       if (signInError) {
@@ -34,6 +42,8 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onForgotPassword }) => {
       console.error('Login error:', err);
       if (err.message.includes('Invalid login credentials')) {
         setError('Invalid email or password. Please check your credentials and try again.');
+      } else if (err.message.includes('Email not confirmed')) {
+        setError('Please check your email and click the confirmation link before signing in.');
       } else {
         setError(err.message || 'An error occurred during login');
       }
@@ -62,7 +72,10 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onForgotPassword }) => {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="bg-gray-800 p-6 rounded-lg shadow-xl space-y-4">
             {error && (
-              <div className="bg-red-900 border border-red-700 text-red-100 px-4 py-3 rounded">
+              <div className="bg-red-900 border border-red-700 text-red-100 px-4 py-3 rounded flex items-center">
+                <svg className="w-4 h-4 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
                 {error}
               </div>
             )}
@@ -115,6 +128,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onForgotPassword }) => {
               loading={loading}
               className="w-full"
               size="lg"
+              disabled={!email.trim() || !password.trim()}
             >
               Sign In
             </Button>

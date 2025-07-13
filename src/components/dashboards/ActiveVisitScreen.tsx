@@ -256,6 +256,10 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
       return;
     }
 
+    if (!confirm(`Place order for R${getOrderTotal().toFixed(2)}? This will generate a PDF receipt.`)) {
+      return;
+    }
+
     setPdfLoading(true);
     setError('');
 
@@ -285,7 +289,10 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
       setOrderItems([]);
       
       // Show success message
-      alert('Order placed successfully! PDF has been downloaded.');
+      setError('');
+      setTimeout(() => {
+        alert('Order placed successfully! PDF has been downloaded.');
+      }, 100);
       
     } catch (err: any) {
       setError('Failed to place order');
@@ -325,7 +332,9 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
     try {
       // Save any unsaved notes first
       if (notes !== (visit.notes || '')) {
+        setSaveLoading(true);
         await handleSaveNotes();
+        setSaveLoading(false);
       }
 
       // End the visit
@@ -339,12 +348,15 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
 
       if (error) throw error;
       
+      // Show success message briefly before redirecting
+      alert('Visit ended successfully!');
       onEndVisit();
     } catch (err: any) {
       setError('Failed to end visit');
       console.error('Error ending visit:', err);
     } finally {
       setEndLoading(false);
+      setSaveLoading(false);
     }
   };
 
@@ -615,9 +627,10 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
             <Button
               onClick={handleEndVisit}
               loading={endLoading}
-              className="bg-red-600 hover:bg-red-700 transition-all duration-200 hover:scale-105"
+              className="bg-red-600 hover:bg-red-700 transition-all duration-200 hover:scale-105 disabled:opacity-50"
+              disabled={saveLoading}
             >
-              End Visit
+              {endLoading ? 'Ending Visit...' : saveLoading ? 'Saving...' : 'End Visit'}
             </Button>
           </div>
         </div>

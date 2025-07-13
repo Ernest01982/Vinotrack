@@ -119,6 +119,17 @@ export const AdminDashboard: React.FC = () => {
     setSuccess('');
 
     try {
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(inviteForm.email)) {
+        throw new Error('Please enter a valid email address');
+      }
+
+      // Validate password strength
+      if (inviteForm.password.length < 6) {
+        throw new Error('Password must be at least 6 characters long');
+      }
+
       // Create user in Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: inviteForm.email,
@@ -145,6 +156,7 @@ export const AdminDashboard: React.FC = () => {
         fetchReps();
       }
     } catch (err: any) {
+      console.error('Invite error:', err);
       setError(err.message || 'Failed to invite user');
     } finally {
       setInviteLoading(false);
@@ -158,6 +170,17 @@ export const AdminDashboard: React.FC = () => {
     setSuccess('');
 
     try {
+      // Validate inputs
+      if (!productForm.name.trim()) {
+        throw new Error('Product name is required');
+      }
+      if (!productForm.description.trim()) {
+        throw new Error('Product description is required');
+      }
+      if (!productForm.price || parseFloat(productForm.price) <= 0) {
+        throw new Error('Product price must be greater than 0');
+      }
+
       const { error } = await supabase
         .from('products')
         .insert({
@@ -173,6 +196,7 @@ export const AdminDashboard: React.FC = () => {
       setShowAddProductModal(false);
       fetchProducts();
     } catch (err: any) {
+      console.error('Add product error:', err);
       setError(err.message || 'Failed to add product');
     } finally {
       setProductLoading(false);
@@ -181,6 +205,10 @@ export const AdminDashboard: React.FC = () => {
 
   const handleFileUpload = async () => {
     if (!uploadFile) return;
+
+    if (!confirm(`Upload ${uploadType.toLowerCase()} from ${uploadFile.name}? This will add new records to your database.`)) {
+      return;
+    }
 
     setUploadLoading(true);
     setUploadResults(null);
@@ -191,6 +219,10 @@ export const AdminDashboard: React.FC = () => {
       const workbook = XLSX.read(data);
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+      if (jsonData.length === 0) {
+        throw new Error('The uploaded file appears to be empty or has no valid data');
+      }
 
       let successCount = 0;
       const errors: string[] = [];
@@ -244,9 +276,16 @@ export const AdminDashboard: React.FC = () => {
       if (uploadType === 'Products') {
         fetchProducts();
       } else {
+      
+      // Clear the file input
+      setUploadFile(null);
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+      
         // You may want to fetch clients here
       }
     } catch (err: any) {
+      console.error('File upload error:', err);
       setError(err.message || 'Failed to process file');
     } finally {
       setUploadLoading(false);
