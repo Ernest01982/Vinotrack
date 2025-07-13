@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import { User, Session } from '@supabase/supabase-js';
+import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase, UserProfile } from '../lib/supabase';
 
 interface AuthContextType {
@@ -8,8 +8,8 @@ interface AuthContextType {
   session: Session | null;
   loading: boolean;
   signOut: () => Promise<void>;
-  signIn: (email: string, password: string) => Promise<any>;
-  resetPassword: (email: string) => Promise<any>;
+  signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
+  resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -41,7 +41,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('id', currentUser.id)
         .single();
 
-      if (error && error.code !== 'PGRST116') {
+      if (error && error.code !== 'PGRST116') { // PGRST116: No rows found
         throw error;
       }
       setUserProfile(data || null);
@@ -76,10 +76,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [fetchUserProfile]);
 
-  const signOut = useCallback(() => supabase.auth.signOut(), []);
-  const signIn = useCallback((email: string, password: string) => supabase.auth.signInWithPassword({ email, password }), []);
-  const resetPassword = useCallback((email: string) => supabase.auth.resetPasswordForEmail(email), []);
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+  }, []);
 
+  const signIn = useCallback(async (email: string, password: string) => {
+    return supabase.auth.signInWithPassword({ email, password });
+  }, []);
+
+  const resetPassword = useCallback(async (email: string) => {
+    return supabase.auth.resetPasswordForEmail(email);
+  }, []);
+  
   const value = useMemo(() => ({
     user,
     userProfile,
