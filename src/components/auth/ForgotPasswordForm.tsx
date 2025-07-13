@@ -22,10 +22,13 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordFormProps> = ({ onBack }
     setLoading(true);
 
     try {
-      await resetPassword(email);
+      const { error: resetError } = await resetPassword(email);
+      if (resetError) {
+        throw resetError;
+      }
       setSuccess(true);
     } catch (err: any) {
-      setError(err.message || 'An error occurred');
+      setError(err.message || 'An error occurred while sending the reset link.');
     } finally {
       setLoading(false);
     }
