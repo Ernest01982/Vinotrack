@@ -1,4 +1,4 @@
- import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Button } from '../ui/Button';
 import { ArrowLeft, User, Mail, Phone, MapPin, Save, FileText, History, ShoppingCart, Plus, Minus, Download, X } from 'lucide-react';
