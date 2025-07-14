@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { ActiveVisitScreen } from './ActiveVisitScreen';
@@ -71,7 +71,6 @@ const RepDashboard: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      // Fetch clients and their last completed visit
       const { data: clientsData, error: clientsError } = await supabase
         .from('clients')
         .select(`*, visits!visits_client_id_fkey(start_time)`)
@@ -85,15 +84,14 @@ const RepDashboard: React.FC = () => {
         const last_visit_date = visits.length > 0
           ? visits.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())[0].start_time
           : undefined;
-        return { ...client, last_visit_date, visits: [] }; // Clear nested visits to avoid stale data
+        return { ...client, last_visit_date, visits: [] };
       });
       setClients(clientsWithLastVisit);
 
-      // Fetch rep stats
       const now = new Date();
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-      const weekAgo = new Date(now.setDate(now.getDate() - 7)).toISOString();
-      const monthAgo = new Date(now.setDate(now.getDate() - 23)).toISOString(); // 7+23=30
+      const weekStart = new Date(now.setDate(now.getDate() - now.getDay())).toISOString();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
       const { data: visitsData, error: visitsError } = await supabase
         .from('visits')
@@ -107,8 +105,8 @@ const RepDashboard: React.FC = () => {
         ...prev,
         totalClients: clientsData.length,
         visitsToday: visitsData.filter(v => v.start_time >= today).length,
-        visitsThisWeek: visitsData.filter(v => v.start_time >= weekAgo).length,
-        visitsThisMonth: visitsData.filter(v => v.start_time >= monthAgo).length,
+        visitsThisWeek: visitsData.filter(v => v.start_time >= weekStart).length,
+        visitsThisMonth: visitsData.filter(v => v.start_time >= monthStart).length,
       }));
 
     } catch (err: any) {
@@ -212,6 +210,10 @@ const RepDashboard: React.FC = () => {
   const handleAddNewClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    if (!newClientForm.name || !newClientForm.email) {
+        setError("Client Name and Email are required.");
+        return;
+    }
     setAddClientLoading(true);
     try {
         const { error } = await supabase.from('clients').insert({
@@ -232,7 +234,7 @@ const RepDashboard: React.FC = () => {
 
   const prioritizedClients = useMemo(() => {
     const now = new Date();
-    const prioritized = clients
+    return clients
       .map(client => {
         const daysBetweenVisits = 30 / client.call_frequency;
         const lastVisit = client.last_visit_date ? new Date(client.last_visit_date) : null;
@@ -250,10 +252,11 @@ const RepDashboard: React.FC = () => {
         const priorityOrder = { high: 0, medium: 1, low: 2 };
         return priorityOrder[a.priority] - priorityOrder[b.priority];
       });
-    
-    setStats(prev => ({...prev, highPriorityClients: prioritized.filter(c => c.priority === 'high').length}));
-    return prioritized;
   }, [clients]);
+
+  useEffect(() => {
+    setStats(prev => ({...prev, highPriorityClients: prioritizedClients.filter(c => c.priority === 'high').length}));
+  }, [prioritizedClients]);
 
   if (activeVisit && selectedClient) {
     return (
