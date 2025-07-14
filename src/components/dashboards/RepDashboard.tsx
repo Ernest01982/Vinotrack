@@ -1,23 +1,42 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
-import { ActiveVisitScreen } from './ActiveVisitScreen';
 import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
-import { User, MapPin, Phone, Mail, Clock, PlusCircle, LogOut, AlertTriangle, CheckCircle, Star, X } from 'lucide-react';
+import { ArrowLeft, User, Mail, Phone, MapPin, Calendar, Clock, Save, FileText, History, ShoppingCart, Plus, Minus, Download, X } from 'lucide-react';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
-// Type definitions
+// Extend jsPDF type to include autoTable for TypeScript
+declare module 'jspdf' {
+  interface jsPDF {
+    autoTable: (options: any) => jsPDF;
+  }
+}
+
+// Interface definitions
 interface Client {
   id: string;
   name: string;
   email: string;
   phone?: string;
   address?: string;
-  consumption_type: 'on-consumption' | 'off-consumption';
-  call_frequency: number;
   assigned_rep_id: string;
   created_at: string;
-  last_visit_date?: string;
+}
+
+interface Product {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  created_at: string;
+}
+
+interface OrderItem {
+  product_id: string;
+  product_name: string;
+  price: number;
+  quantity: number;
+  total: number;
 }
 
 interface Visit {
@@ -32,369 +51,355 @@ interface Visit {
   created_at: string;
 }
 
-const RepDashboard: React.FC = () => {
-  const { user, userProfile, signOut } = useAuth();
-  const [clients, setClients] = useState<Client[]>([]);
-  const [activeVisit, setActiveVisit] = useState<Visit | null>(null);
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [loading, setLoading] = useState(true);
+interface ActiveVisitScreenProps {
+  visit: Visit;
+  client: Client;
+  onEndVisit: () => void;
+  onBack: () => void;
+}
+
+export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
+  visit,
+  client,
+  onEndVisit,
+  onBack
+}) => {
+  const [activeTab, setActiveTab] = useState('notes');
+  const [notes, setNotes] = useState(visit.notes || '');
+  const [visitHistory, setVisitHistory] = useState<Visit[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [endLoading, setEndLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [locationError, setLocationError] = useState('');
+  
+  // Order tab state
+  const [products, setProducts] = useState<Product[]>([]);
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
-  // State for the "Add Client" modal
-  const [showAddClientModal, setShowAddClientModal] = useState(false);
-  const [newClientForm, setNewClientForm] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    address: '',
-    consumption_type: 'on-consumption' as 'on-consumption' | 'off-consumption',
-    call_frequency: 1,
-  });
-  const [addClientLoading, setAddClientLoading] = useState(false);
+  // Modal State
+  const [showConfirmOrderModal, setShowConfirmOrderModal] = useState(false);
 
-  // Fetch initial data on component mount
+  // Auto-save notes every 3 seconds when typing
   useEffect(() => {
-    if (user) {
-      fetchClients(user.id);
-      checkActiveVisit(user.id);
-    }
-  }, [user]);
+    const timeoutId = setTimeout(() => {
+      if (notes !== (visit.notes || '')) {
+        handleSaveNotes();
+      }
+    }, 3000);
 
-  // Clear success/error messages after a delay
+    return () => clearTimeout(timeoutId);
+  }, [notes, visit.notes]);
+
+  // Fetch data when component mounts or tab changes
   useEffect(() => {
-    if (success || error || locationError) {
-        const timer = setTimeout(() => {
-            setSuccess('');
-            setError('');
-            setLocationError('');
-        }, 5000);
-        return () => clearTimeout(timer);
+    if (activeTab === 'history') {
+      fetchVisitHistory();
+    } else if (activeTab === 'order') {
+      fetchProducts();
     }
-  }, [success, error, locationError]);
+  }, [activeTab, client.id]);
 
-
-  const fetchClients = async (repId: string) => {
+  const fetchVisitHistory = async () => {
     setLoading(true);
+    setError('');
     try {
       const { data, error } = await supabase
-        .from('clients')
-        .select('*, visits(start_time)')
-        .eq('assigned_rep_id', repId)
+        .from('visits')
+        .select('*')
+        .eq('client_id', client.id)
+        .neq('id', visit.id) // Exclude current visit
+        .order('start_time', { ascending: false });
+
+      if (error) throw error;
+      setVisitHistory(data || []);
+    } catch (err: any) {
+      setError('Failed to fetch visit history');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchProducts = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
         .order('name', { ascending: true });
 
       if (error) throw error;
-
-      const clientsWithLastVisit = data.map(client => {
-        const visits = (client.visits as any[]) || [];
-        const last_visit_date = visits.length > 0
-          ? visits.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())[0].start_time
-          : undefined;
-        return { ...client, last_visit_date };
-      });
-
-      setClients(clientsWithLastVisit);
+      setProducts(data || []);
     } catch (err: any) {
-      setError('Failed to fetch clients.');
+      setError('Failed to fetch products');
     } finally {
       setLoading(false);
     }
   };
 
-  const checkActiveVisit = async (repId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('visits')
-        .select('*, clients(*)')
-        .eq('rep_id', repId)
-        .is('end_time', null)
-        .single();
+  const updateQuantity = (product: Product, quantity: number) => {
+    if (quantity <= 0) {
+      setOrderItems(prev => prev.filter(item => item.product_id !== product.id));
+    } else {
+      const total = product.price * quantity;
+      const orderItem: OrderItem = {
+        product_id: product.id,
+        product_name: product.name,
+        price: product.price,
+        quantity,
+        total
+      };
 
-      if (error && error.code !== 'PGRST116') throw error;
-
-      if (data) {
-        setActiveVisit(data as any);
-        setSelectedClient((data as any).clients);
-      }
-    } catch (err: any) {
-      console.error('Check active visit error:', err);
+      setOrderItems(prev => {
+        const existingIndex = prev.findIndex(item => item.product_id === product.id);
+        if (existingIndex >= 0) {
+          const updated = [...prev];
+          updated[existingIndex] = orderItem;
+          return updated;
+        } else {
+          return [...prev, orderItem];
+        }
+      });
     }
   };
 
-  const handleStartVisit = (client: Client) => {
-    setLocationError('');
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation is not supported by your browser.');
+  const getQuantity = (productId: string): number => {
+    return orderItems.find(item => item.product_id === productId)?.quantity || 0;
+  };
+
+  const getOrderTotal = (): number => {
+    return orderItems.reduce((sum, item) => sum + item.total, 0);
+  };
+
+  const generatePDF = (orderData: any) => {
+    const doc = new jsPDF();
+    
+    doc.setFontSize(20);
+    doc.setTextColor(128, 0, 128);
+    doc.text('Vino Tracker', 20, 20);
+    
+    doc.setFontSize(16);
+    doc.setTextColor(0, 0, 0);
+    doc.text('Order Confirmation', 20, 35);
+    
+    doc.setFontSize(12);
+    doc.text(`Order ID: ${orderData.id}`, 20, 50);
+    doc.text(`Date: ${new Date(orderData.created_at).toLocaleDateString()}`, 20, 60);
+    
+    doc.setFontSize(14);
+    doc.text('Client Information:', 20, 80);
+    doc.setFontSize(12);
+    doc.text(`Name: ${client.name}`, 20, 90);
+    doc.text(`Email: ${client.email}`, 20, 100);
+    
+    const tableData = orderItems.map(item => [
+      item.product_name,
+      item.quantity.toString(),
+      `R${item.price.toFixed(2)}`,
+      `R${item.total.toFixed(2)}`
+    ]);
+    
+    // FIX: autoTable is a method on the doc instance
+    doc.autoTable({
+      head: [['Product', 'Quantity', 'Unit Price', 'Total']],
+      body: tableData,
+      startY: 110,
+      theme: 'grid',
+      headStyles: { fillColor: [128, 0, 128] },
+    });
+    
+    const finalY = (doc as any).lastAutoTable.finalY;
+    doc.setFontSize(14);
+    doc.text(`Order Total: R${getOrderTotal().toFixed(2)}`, 20, finalY + 15);
+    
+    doc.save(`Order_${orderData.id}_${client.name.replace(/\s+/g, '_')}.pdf`);
+  };
+
+  const handlePlaceOrder = async () => {
+    setShowConfirmOrderModal(false);
+    if (orderItems.length === 0) {
+      setError('Please add items to your order before placing it');
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        setLoading(true);
-        try {
-          const { data, error } = await supabase
-            .from('visits')
-            .insert({
-              client_id: client.id,
-              rep_id: user!.id,
-              latitude: position.coords.latitude,
-              longitude: position.coords.longitude,
-            })
-            .select('*, clients(*)')
-            .single();
+    setPdfLoading(true);
+    setError('');
+    try {
+      const orderData = {
+        client_id: client.id,
+        rep_id: visit.rep_id,
+        visit_id: visit.id,
+        total_amount: getOrderTotal(),
+        items: orderItems,
+      };
 
-          if (error) throw error;
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .insert(orderData)
+        .select()
+        .single();
 
-          setActiveVisit(data as any);
-          setSelectedClient((data as any).clients);
-        } catch (err: any) {
-          setError('Failed to start visit.');
-        } finally {
-          setLoading(false);
-        }
-      },
-      () => {
-        setLocationError('Geolocation error. Please enable location services.');
-      }
-    );
+      if (orderError) throw orderError;
+
+      generatePDF(order);
+      setOrderItems([]);
+      setSuccess('Order placed successfully and PDF downloaded!');
+      
+    } catch (err: any) {
+      setError('Failed to place order');
+    } finally {
+      setPdfLoading(false);
+    }
   };
 
-  const handleEndVisit = async () => {
-    if (!activeVisit) return;
-    setLoading(true);
+  const handleSaveNotes = async () => {
+    setSaveLoading(true);
     try {
       const { error } = await supabase
         .from('visits')
-        .update({ end_time: new Date().toISOString() })
-        .eq('id', activeVisit.id);
+        .update({ notes })
+        .eq('id', visit.id);
 
       if (error) throw error;
-
-      setActiveVisit(null);
-      setSelectedClient(null);
-      if (user) fetchClients(user.id);
+      setSuccess('Notes saved.');
     } catch (err: any) {
-      setError('Failed to end visit.');
+      setError('Failed to save notes');
     } finally {
-      setLoading(false);
+      setSaveLoading(false);
     }
   };
 
-  const handleAddNewClient = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) {
-        setError("You must be logged in to add a client.");
-        return;
-    }
-    setAddClientLoading(true);
-    setError('');
-    setSuccess('');
-
+  const handleEndVisit = async () => {
+    setEndLoading(true);
     try {
-        if (!newClientForm.name.trim() || !newClientForm.email.trim()) {
-            throw new Error("Client Name and Email are required.");
-        }
+      await handleSaveNotes();
+      const { error } = await supabase
+        .from('visits')
+        .update({ end_time: new Date().toISOString(), notes })
+        .eq('id', visit.id);
 
-        const { error } = await supabase.from('clients').insert({
-            ...newClientForm,
-            assigned_rep_id: user.id, // Assign client to the current rep
-        });
-
-        if (error) throw error;
-
-        setSuccess(`Client "${newClientForm.name}" added successfully!`);
-        setShowAddClientModal(false);
-        setNewClientForm({
-            name: '', email: '', phone: '', address: '',
-            consumption_type: 'on-consumption', call_frequency: 1,
-        });
-        fetchClients(user.id); // Refresh the client list
+      if (error) throw error;
+      setSuccess('Visit ended successfully!');
+      setTimeout(onEndVisit, 1000); // Go back after a short delay
     } catch (err: any) {
-        if (err.message.includes('duplicate key')) {
-            setError('A client with this email address already exists.');
-        } else {
-            setError(err.message || "Failed to add new client.");
-        }
+      setError('Failed to end visit');
     } finally {
-        setAddClientLoading(false);
+      setEndLoading(false);
     }
   };
 
-  const prioritizedClients = useMemo(() => {
-    const now = new Date();
-    return clients
-      .map(client => {
-        const daysBetweenVisits = 30 / client.call_frequency;
-        const lastVisit = client.last_visit_date ? new Date(client.last_visit_date) : null;
-        let priority: 'high' | 'medium' | 'low' = 'low';
-        let daysSinceLastVisit: number | null = null;
-
-        if (lastVisit) {
-          daysSinceLastVisit = (now.getTime() - lastVisit.getTime()) / (1000 * 3600 * 24);
-          if (daysSinceLastVisit > daysBetweenVisits) {
-            priority = 'high';
-          } else if (daysSinceLastVisit > daysBetweenVisits * 0.75) {
-            priority = 'medium';
-          }
-        } else {
-          priority = 'high';
-        }
-        return { ...client, priority, daysSinceLastVisit };
-      })
-      .sort((a, b) => {
-        const priorityOrder = { high: 0, medium: 1, low: 2 };
-        if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
-          return priorityOrder[a.priority] - priorityOrder[b.priority];
-        }
-        return (b.daysSinceLastVisit || 999) - (a.daysSinceLastVisit || 999);
-      });
-  }, [clients]);
-
-  if (activeVisit && selectedClient) {
-    return (
-      <ActiveVisitScreen
-        visit={activeVisit}
-        client={selectedClient}
-        onEndVisit={handleEndVisit}
-        onBack={() => {
-          setActiveVisit(null);
-          setSelectedClient(null);
-        }}
-      />
-    );
-  }
-
+  // UI Render functions...
   return (
     <>
-      <div className="min-h-screen bg-gray-900 text-white">
-        <header className="bg-gray-800 shadow-md">
+      <div className="min-h-screen bg-gray-900">
+        <header className="bg-gray-800 border-b border-gray-700">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-            <div>
-              <h1 className="text-2xl font-bold text-white">VinoTracker</h1>
-              <p className="text-sm text-gray-400">Welcome, {userProfile?.full_name || user?.email}</p>
-            </div>
-            <div className="flex items-center space-x-4">
-                <Button onClick={() => setShowAddClientModal(true)} className="bg-purple-600 hover:bg-purple-700">
-                    <PlusCircle className="h-4 w-4 mr-2" />
-                    Add New Client
-                </Button>
-                <Button onClick={signOut} variant="outline" size="sm">
-                    <LogOut className="h-4 w-4 mr-2" />
-                    Sign Out
-                </Button>
-            </div>
+            <Button onClick={onBack} variant="outline" size="sm"><ArrowLeft className="h-4 w-4 mr-2" />Back</Button>
+            <h1 className="text-xl font-bold text-white">Active Visit</h1>
+            <Button onClick={handleEndVisit} loading={endLoading} className="bg-red-600 hover:bg-red-700">End Visit</Button>
           </div>
         </header>
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            {error && <div className="bg-red-900 border border-red-700 text-red-100 px-4 py-3 rounded mb-6">{error}</div>}
-            {success && <div className="bg-green-800 border border-green-600 text-green-200 px-4 py-3 rounded mb-6">{success}</div>}
-            {locationError && <div className="bg-yellow-900 border border-yellow-700 text-yellow-100 px-4 py-3 rounded mb-6">{locationError}</div>}
-
-            <h2 className="text-xl font-semibold mb-4">Your Clients ({clients.length})</h2>
-
-            {loading ? (
-            <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
-                <p className="mt-4 text-gray-400">Loading clients...</p>
+          {error && <div className="bg-red-900 border border-red-700 text-red-100 px-4 py-3 rounded mb-6">{error}</div>}
+          {success && <div className="bg-green-800 border border-green-600 text-green-200 px-4 py-3 rounded mb-6">{success}</div>}
+          
+          {/* Client Info Card */}
+          <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-8">
+            <div className="flex items-center space-x-3 mb-4">
+                <User className="h-5 w-5 text-purple-400" />
+                <h2 className="text-lg font-semibold text-white">Client: {client.name}</h2>
             </div>
-            ) : (
-            <div className="space-y-4">
-                {prioritizedClients.map((client) => {
-                const priorityStyles = {
-                    high: { icon: <AlertTriangle className="h-5 w-5 text-red-400" />, text: 'High Priority', color: 'border-red-500' },
-                    medium: { icon: <Star className="h-5 w-5 text-yellow-400" />, text: 'Medium Priority', color: 'border-yellow-500' },
-                    low: { icon: <CheckCircle className="h-5 w-5 text-green-400" />, text: 'On Track', color: 'border-green-500' },
-                };
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div className="flex items-center text-gray-300"><Mail className="h-4 w-4 mr-3 text-purple-400" /><span>{client.email}</span></div>
+                {client.phone && <div className="flex items-center text-gray-300"><Phone className="h-4 w-4 mr-3 text-purple-400" /><span>{client.phone}</span></div>}
+                {client.address && <div className="flex items-center text-gray-300 md:col-span-2"><MapPin className="h-4 w-4 mr-3 text-purple-400" /><span>{client.address}</span></div>}
+            </div>
+          </div>
 
-                return (
-                    <div key={client.id} className={`bg-gray-800 rounded-lg shadow-lg p-5 border-l-4 ${priorityStyles[client.priority].color} transition-all duration-300 hover:shadow-purple-500/20 hover:bg-gray-700`}>
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
-                        <div className="flex-1 mb-4 sm:mb-0">
-                        <div className="flex items-center mb-2">
-                            <h3 className="text-lg font-bold text-white mr-3">{client.name}</h3>
-                            <span className="text-xs font-semibold px-2 py-1 bg-purple-600 rounded-full">{client.consumption_type}</span>
-                        </div>
-                        <div className="flex flex-wrap text-sm text-gray-400 gap-x-4 gap-y-1">
-                            <span className="flex items-center"><Mail className="h-4 w-4 mr-2" />{client.email}</span>
-                            {client.phone && <span className="flex items-center"><Phone className="h-4 w-4 mr-2" />{client.phone}</span>}
-                            {client.address && <span className="flex items-center"><MapPin className="h-4 w-4 mr-2" />{client.address}</span>}
-                        </div>
-                        </div>
-                        <div className="w-full sm:w-auto flex items-center justify-between sm:justify-end space-x-4">
-                        <div className="text-right">
-                            <div className="flex items-center justify-end text-sm font-medium">
-                            {priorityStyles[client.priority].icon}
-                            <span className="ml-1.5">{priorityStyles[client.priority].text}</span>
+          {/* Tabbed Interface */}
+          <div className="bg-gray-800 rounded-lg border border-gray-700">
+            <nav className="border-b border-gray-700 flex space-x-8 px-6">
+              <button onClick={() => setActiveTab('notes')} className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notes' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}>Notes</button>
+              <button onClick={() => setActiveTab('order')} className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'order' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}>Order</button>
+              <button onClick={() => setActiveTab('history')} className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'history' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}>History</button>
+            </nav>
+            <div className="p-6">
+              {/* Tab Content */}
+              {activeTab === 'notes' && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium text-white">Visit Notes</h3>
+                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Enter visit notes..." className="w-full h-64 p-3 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                  <Button onClick={handleSaveNotes} loading={saveLoading}><Save className="h-4 w-4 mr-2" />Save Notes</Button>
+                </div>
+              )}
+              {activeTab === 'order' && (
+                <div className="space-y-6">
+                  <h3 className="text-lg font-medium text-white">Place Order</h3>
+                  {orderItems.length > 0 && (
+                    <div className="bg-gray-700 rounded-lg p-4 border border-gray-600">
+                      <h4 className="text-white font-medium mb-3">Order Summary</h4>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {orderItems.map(item => <div key={item.product_id} className="flex justify-between text-sm"><span>{item.product_name} x{item.quantity}</span><span>R{item.total.toFixed(2)}</span></div>)}
+                      </div>
+                      <div className="border-t border-gray-600 mt-3 pt-3 flex justify-between items-center">
+                        <span className="text-lg font-bold text-green-400">Total: R{getOrderTotal().toFixed(2)}</span>
+                        <Button onClick={() => setShowConfirmOrderModal(true)} loading={pdfLoading} className="bg-green-600 hover:bg-green-700"><Download className="h-4 w-4 mr-2" />Place Order & Get PDF</Button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="space-y-4">
+                    <h4 className="text-white font-medium">Available Products</h4>
+                    {loading ? <p>Loading products...</p> : (
+                      <div className="grid grid-cols-1 gap-4">
+                        {products.map((product) => (
+                          <div key={product.id} className="bg-gray-700 rounded-lg p-4 border border-gray-600 flex items-center justify-between">
+                            <div>
+                              <h5 className="text-white font-medium">{product.name}</h5>
+                              <p className="text-green-400 font-bold">R{product.price.toFixed(2)}</p>
                             </div>
-                            <p className="text-xs text-gray-500 mt-1">
-                            {client.last_visit_date ? `Last visit: ${new Date(client.last_visit_date).toLocaleDateString()}` : 'No visits yet'}
-                            </p>
-                        </div>
-                        <Button
-                            onClick={() => handleStartVisit(client)}
-                            disabled={!!activeVisit || loading}
-                            className={`w-full sm:w-auto transition-all duration-200 hover:scale-105 ${
-                            client.priority === 'high'
-                                ? 'bg-red-600 hover:bg-red-700 text-white'
-                                : 'bg-purple-600 hover:bg-purple-700 text-white'
-                            } ${!!activeVisit || loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                            <PlusCircle className="h-5 w-5 mr-2" />
-                            Start Visit
-                        </Button>
-                        </div>
+                            <div className="flex items-center space-x-3">
+                              <Button onClick={() => updateQuantity(product, getQuantity(product.id) - 1)} size="sm" variant="outline" disabled={getQuantity(product.id) <= 0}><Minus className="h-3 w-3" /></Button>
+                              <span className="text-white font-medium w-8 text-center">{getQuantity(product.id)}</span>
+                              <Button onClick={() => updateQuantity(product, getQuantity(product.id) + 1)} size="sm" variant="outline"><Plus className="h-3 w-3" /></Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {activeTab === 'history' && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium text-white">Visit History</h3>
+                  {loading ? <p>Loading history...</p> : visitHistory.length === 0 ? <p>No previous visits.</p> : (
+                    <div className="space-y-3">
+                      {visitHistory.map(v => <div key={v.id} className="bg-gray-700 p-4 rounded-lg"><p className="font-medium text-white">{new Date(v.start_time).toLocaleString()}</p><p className="text-sm text-gray-300 whitespace-pre-wrap">{v.notes || 'No notes for this visit.'}</p></div>)}
                     </div>
-                    </div>
-                );
-                })}
+                  )}
+                </div>
+              )}
             </div>
-            )}
+          </div>
         </main>
       </div>
 
-      {/* Add Client Modal */}
-      {showAddClientModal && (
+      {/* Confirmation Modal */}
+      {showConfirmOrderModal && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-lg border border-gray-700 relative">
-                <button onClick={() => setShowAddClientModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white">
-                    <X className="h-6 w-6" />
-                </button>
-                <h3 className="text-lg font-medium text-white mb-4">Add New Client</h3>
-                <form onSubmit={handleAddNewClient} className="space-y-4">
-                    <Input label="Client Name" type="text" value={newClientForm.name} onChange={(e) => setNewClientForm({ ...newClientForm, name: e.target.value })} required />
-                    <Input label="Email Address" type="email" value={newClientForm.email} onChange={(e) => setNewClientForm({ ...newClientForm, email: e.target.value })} required />
-                    <Input label="Phone Number" type="tel" value={newClientForm.phone} onChange={(e) => setNewClientForm({ ...newClientForm, phone: e.target.value })} />
-                    <Input label="Address" type="text" value={newClientForm.address} onChange={(e) => setNewClientForm({ ...newClientForm, address: e.target.value })} />
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Consumption Type</label>
-                            <select value={newClientForm.consumption_type} onChange={(e) => setNewClientForm({ ...newClientForm, consumption_type: e.target.value as any })} className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                <option value="on-consumption">On-Consumption</option>
-                                <option value="off-consumption">Off-Consumption</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Call Frequency (per month)</label>
-                            <select value={newClientForm.call_frequency} onChange={(e) => setNewClientForm({ ...newClientForm, call_frequency: parseInt(e.target.value) })} className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                <option value={1}>1</option>
-                                <option value={2}>2</option>
-                                <option value={3}>3</option>
-                                <option value={4}>4</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div className="flex justify-end space-x-3 pt-4">
-                        <Button type="button" onClick={() => setShowAddClientModal(false)} variant="secondary">Cancel</Button>
-                        <Button type="submit" loading={addClientLoading} className="bg-purple-600 hover:bg-purple-700">Add Client</Button>
-                    </div>
-                </form>
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700">
+                <h3 className="text-lg font-medium text-white mb-2">Confirm Order</h3>
+                <p className="text-sm text-gray-400 mb-4">Are you sure you want to place this order for <span className="font-bold text-green-400">R{getOrderTotal().toFixed(2)}</span>? A PDF receipt will be generated.</p>
+                <div className="flex justify-end space-x-3 pt-4">
+                    <Button type="button" onClick={() => setShowConfirmOrderModal(false)} variant="secondary">Cancel</Button>
+                    <Button onClick={handlePlaceOrder} className="bg-green-600 hover:bg-green-700">Yes, Place Order</Button>
+                </div>
             </div>
         </div>
       )}
     </>
   );
 };
-
-export default RepDashboard;
