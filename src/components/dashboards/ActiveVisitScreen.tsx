@@ -250,6 +250,8 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
 
     setPdfLoading(true);
     setError('');
+    setSuccess(''); // Clear previous success messages
+
     try {
       const { data: order, error: orderError } = await supabase
         .from('orders')
@@ -263,15 +265,24 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
         .select()
         .single();
 
-      if (orderError) throw orderError;
-
-      generatePDF(order);
-      setOrderItems([]);
-      await saveDraftOrder([]); // Clear the draft order
-      setSuccess('Order placed successfully and PDF downloaded!');
+      if (orderError) {
+        // This will now catch the specific database error
+        console.error('Database Insert Error:', orderError);
+        throw orderError;
+      }
       
+      // If the code reaches here, the database part was successful.
+      // We are skipping PDF generation for this test.
+      setSuccess('Order successfully saved to the database! PDF generation is the next step.');
+
+      // Clear the cart
+      setOrderItems([]);
+      await saveDraftOrder([]);
+
     } catch (err: any) {
-      setError('Failed to place order.');
+      // The error from the 'throw' above will be caught here
+      setError(`Failed to place order. Please check the console for details.`);
+      console.error('Full error object:', err);
     } finally {
       setPdfLoading(false);
     }
