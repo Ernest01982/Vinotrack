@@ -4,32 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ActiveVisitScreen } from './ActiveVisitScreen';
 import { Button } from '../ui/Button';
 import { User, MapPin, Phone, Mail, Clock, PlusCircle, LogOut, AlertTriangle, CheckCircle, ChevronRight, Star } from 'lucide-react';
-
-// Type definitions
-interface Client {
-  id: string;
-  name: string;
-  email: string;
-  phone?: string;
-  address?: string;
-  consumption_type: 'on-consumption' | 'off-consumption';
-  call_frequency: number;
-  assigned_rep_id: string;
-  created_at: string;
-  last_visit_date?: string;
-}
-
-interface Visit {
-  id: string;
-  client_id: string;
-  rep_id: string;
-  start_time: string;
-  end_time?: string;
-  latitude?: number;
-  longitude?: number;
-  notes?: string;
-  created_at: string;
-}
+import type { Client, Visit } from '../../types';
 
 const RepDashboard: React.FC = () => {
   const { user, userProfile, signOut } = useAuth();
