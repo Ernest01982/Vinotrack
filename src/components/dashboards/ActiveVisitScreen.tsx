@@ -211,19 +211,19 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
     doc.setTextColor(0, 0, 0);
     doc.text('Order Confirmation', 20, 35);
     doc.setFontSize(12);
-    doc.text(Order ID: ${orderData.id}, 20, 50);
-    doc.text(Date: ${new Date(orderData.created_at).toLocaleDateString()}, 20, 60);
+    doc.text(`Order ID: ${orderData.id}`, 20, 50);
+    doc.text(`Date: ${new Date(orderData.created_at).toLocaleDateString()}`, 20, 60);
     doc.setFontSize(14);
     doc.text('Client Information:', 20, 80);
     doc.setFontSize(12);
-    doc.text(Name: ${client.name}, 20, 90);
-    doc.text(Email: ${client.email}, 20, 100);
+    doc.text(`Name: ${client.name}`, 20, 90);
+    doc.text(`Email: ${client.email}`, 20, 100);
     
     const tableData = orderItems.map(item => [
       item.product_name,
       item.quantity.toString(),
-      R${item.price.toFixed(2)},
-      R${item.total.toFixed(2)}
+      `R${item.price.toFixed(2)}`,
+      `R${item.total.toFixed(2)}`
     ]);
     
     doc.autoTable({
@@ -236,9 +236,9 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
     
     const finalY = (doc as any).lastAutoTable.finalY;
     doc.setFontSize(14);
-    doc.text(Order Total: R${getOrderTotal().toFixed(2)}, 20, finalY + 15);
+    doc.text(`Order Total: R${getOrderTotal().toFixed(2)}`, 20, finalY + 15);
     
-    doc.save(Order_${orderData.id}_${client.name.replace(/\s+/g, '_')}.pdf);
+    doc.save(`Order_${orderData.id}_${client.name.replace(/\s+/g, '_')}.pdf`);
   };
 
   const handlePlaceOrder = async () => {
@@ -345,9 +345,36 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
 
           <div className="bg-gray-800 rounded-lg border border-gray-700">
             <nav className="border-b border-gray-700 flex space-x-8 px-6">
-              <button onClick={() => setActiveTab('notes')} className={py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notes' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}}>Notes</button>
-              <button onClick={() => setActiveTab('order')} className={py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'order' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}}>Order</button>
-              <button onClick={() => setActiveTab('history')} className={py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'history' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}}>History</button>
+              <button
+                onClick={() => setActiveTab('notes')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'notes'
+                    ? 'border-purple-500 text-purple-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                Notes
+              </button>
+              <button
+                onClick={() => setActiveTab('order')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'order'
+                    ? 'border-purple-500 text-purple-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                Order
+              </button>
+              <button
+                onClick={() => setActiveTab('history')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'history'
+                    ? 'border-purple-500 text-purple-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                History
+              </button>
             </nav>
             <div className="p-6">
               {activeTab === 'notes' && (
@@ -364,10 +391,15 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
                     <div className="bg-gray-700 rounded-lg p-4 border border-gray-600">
                       <h4 className="text-white font-medium mb-3">Order Summary</h4>
                       <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {orderItems.map(item => <div key={item.product_id} className="flex justify-between text-sm"><span>{item.product_name} x{item.quantity}</span><span>R{item.total.toFixed(2)}</span></div>)}
+                        {orderItems.map(item => (
+                          <div key={item.product_id} className="flex justify-between text-sm">
+                            <span>{item.product_name} x{item.quantity}</span>
+                            <span>{`R${item.total.toFixed(2)}`}</span>
+                          </div>
+                        ))}
                       </div>
                       <div className="border-t border-gray-600 mt-3 pt-3 flex justify-between items-center">
-                        <span className="text-lg font-bold text-green-400">Total: R{getOrderTotal().toFixed(2)}</span>
+                        <span className="text-lg font-bold text-green-400">{`Total: R${getOrderTotal().toFixed(2)}`}</span>
                         <Button onClick={() => setShowConfirmOrderModal(true)} loading={pdfLoading} className="bg-green-600 hover:bg-green-700"><Download className="h-4 w-4 mr-2" />Place Order & Get PDF</Button>
                       </div>
                     </div>
@@ -380,7 +412,7 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
                           <div key={product.id} className="bg-gray-700 rounded-lg p-4 border border-gray-600 flex items-center justify-between">
                             <div>
                               <h5 className="text-white font-medium">{product.name}</h5>
-                              <p className="text-green-400 font-bold">R{product.price.toFixed(2)}</p>
+                              <p className="text-green-400 font-bold">{`R${product.price.toFixed(2)}`}</p>
                             </div>
                             <div className="flex items-center space-x-3">
                               <Button onClick={() => updateQuantity(product, getQuantity(product.id) - 1)} size="sm" variant="outline" disabled={getQuantity(product.id) <= 0}><Minus className="h-3 w-3" /></Button>
@@ -413,7 +445,11 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
             <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700">
                 <h3 className="text-lg font-medium text-white mb-2">Confirm Order</h3>
-                <p className="text-sm text-gray-400 mb-4">Are you sure you want to place this order for <span className="font-bold text-green-400">R{getOrderTotal().toFixed(2)}</span>? A PDF receipt will be generated.</p>
+                <p className="text-sm text-gray-400 mb-4">
+                    Are you sure you want to place this order for
+                    <span className="font-bold text-green-400">{`R${getOrderTotal().toFixed(2)}`}</span>?
+                    A PDF receipt will be generated.
+                </p>
                 <div className="flex justify-end space-x-3 pt-4">
                     <Button type="button" onClick={() => setShowConfirmOrderModal(false)} variant="secondary">Cancel</Button>
                     <Button onClick={handlePlaceOrder} className="bg-green-600 hover:bg-green-700">Yes, Place Order</Button>
