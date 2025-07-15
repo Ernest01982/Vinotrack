@@ -400,7 +400,18 @@ export const AdminDashboard: React.FC = () => {
     const renderInventoryTab = () => (
         <div className="space-y-6">
              <div className="flex justify-between items-center"><h2 className="text-2xl font-bold text-white">Product Inventory</h2><Button onClick={() => setShowAddProductModal(true)} className="bg-purple-600 hover:bg-purple-700"><Package className="h-4 w-4 mr-2" />Add Product</Button></div>
-             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">{products.map((product) => (<div key={product.id} className="bg-gray-800 shadow rounded-lg border border-gray-700 p-6"><h3 className="text-lg font-medium text-white mb-2">{product.name}</h3><p className="text-gray-300 text-sm mb-4">{product.description}</p><div className="flex justify-between items-center"><span className="text-2xl font-bold text-purple-400">R{product.price.toFixed(2)}</span><span className="text-xs text-gray-500">{new Date(product.created_at).toLocaleDateString()}</span></div></div>))}</div>
+             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                {products.map((product) => (
+                    <div key={product.id} className="bg-gray-800 shadow rounded-lg border border-gray-700 p-6">
+                        <h3 className="text-lg font-medium text-white mb-2">{product.name}</h3>
+                        <p className="text-gray-300 text-sm mb-4">{product.description}</p>
+                        <div className="flex justify-between items-center">
+                            <span className="text-2xl font-bold text-purple-400">{`R${product.price.toFixed(2)}`}</span>
+                            <span className="text-xs text-gray-500">{new Date(product.created_at).toLocaleDateString()}</span>
+                        </div>
+                    </div>
+                ))}
+             </div>
         </div>
     );
 
