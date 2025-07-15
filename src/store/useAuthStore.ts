@@ -22,13 +22,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loading: true,
 
   initialize: () => {
+    // Fail-safe timeout: If auth state is not resolved in 10 seconds, stop loading.
+    const loadingTimeout = setTimeout(() => {
+      if (get().loading) {
+        console.error("Authentication timeout. Check Supabase connection.");
+        set({ loading: false });
+      }
+    }, 10000);
+
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
-        set({ session, user: session?.user ?? null });
+        // Clear the timeout once the listener fires.
+        clearTimeout(loadingTimeout);
 
-        // Fetch user profile if a user exists
-        if (session?.user) {
-          try {
+        try {
+          set({ session, user: session?.user ?? null });
+
+          // Fetch user profile if a user exists
+          if (session?.user) {
             const { data, error } = await supabase
               .from('profiles')
               .select('*')
@@ -37,21 +48,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             
             if (error && error.code !== 'PGRST116') throw error;
             set({ userProfile: data || null });
-          } catch (error) {
-            console.error("Error fetching user profile:", error);
+          } else {
+            // If there's no session, ensure profile is also null
             set({ userProfile: null });
           }
-        } else {
+        } catch (error) {
+          console.error("Error in onAuthStateChange handler:", error);
           set({ userProfile: null });
+        } finally {
+          // Ensure loading is always set to false after the first check.
+          set({ loading: false });
         }
-        
-        // Initial loading is complete after the first auth state check
-        set({ loading: false });
       }
     );
     
     // Return the unsubscribe function for cleanup
     return () => {
+      clearTimeout(loadingTimeout);
       authListener.subscription.unsubscribe();
     };
   },
@@ -70,5 +83,3 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return supabase.auth.resetPasswordForEmail(email);
   },
 }));
-
-// We no longer initialize here. This will be handled in the AuthProvider.
