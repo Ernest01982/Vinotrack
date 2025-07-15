@@ -3,16 +3,9 @@ import { Users, BarChart3, Settings, Wine, TrendingUp, Package, UserPlus, Mail, 
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { supabase, UserProfile } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase';
 import * as XLSX from 'xlsx';
-
-interface Product {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  created_at: string;
-}
+import type { Product, UserProfile } from '../../types';
 
 export const AdminDashboard: React.FC = () => {
   const { userProfile } = useAuth();
