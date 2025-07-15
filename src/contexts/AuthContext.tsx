@@ -1,94 +1,64 @@
-import { create } from 'zustand';
-import { supabase } from '../lib/supabase';
-import type { User, Session, AuthError } from '@supabase/supabase-js';
-import type { UserProfile } from '../types';
+import React, { useState } from 'react';
+import AuthProvider, { useAuth } from './contexts/AuthContext'; // <-- IMPORT UPDATED HERE
+import { AdminDashboard } from './components/dashboards/AdminDashboard';
+import RepDashboard from './components/dashboards/RepDashboard';
+import { LoginForm } from './components/auth/LoginForm';
+import { ForgotPasswordForm } from './components/auth/ForgotPasswordForm';
+import { Button } from './components/ui/Button';
 
-interface AuthState {
-  user: User | null;
-  userProfile: UserProfile | null;
-  session: Session | null;
-  loading: boolean;
-  
-  checkSession: () => Promise<void>;
-  setupListener: () => () => void; // Returns the unsubscribe function
-  signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
-  signOut: () => Promise<void>;
-  resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
+const AppContent: React.FC = () => {
+  const { user, userProfile, loading, signOut } = useAuth();
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+
+  // Initial loading state for the whole application
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <div className="space-y-2">
+            <p className="text-white text-lg font-medium">VinoTracker</p>
+            <p className="text-gray-400">Initializing application...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If there's no user, direct to authentication
+  if (!user) {
+    return showForgotPassword
+      ? <ForgotPasswordForm onBack={() => setShowForgotPassword(false)} />
+      : <LoginForm onForgotPassword={() => setShowForgotPassword(true)} />;
+  }
+
+  // If user is logged in, but the profile is missing (error state)
+  if (!userProfile) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center text-center">
+        <div>
+          <h2 className="text-2xl font-bold text-white mb-2">Profile Error</h2>
+          <p className="text-gray-400 mb-6 max-w-sm">
+            We couldn't load your user profile. This can happen if the profile is missing or due to a network issue. Please try signing out and back in, or contact support if the problem persists.
+          </p>
+          <Button onClick={signOut} variant="secondary" size="lg">
+            Sign Out
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // User and profile are loaded, show the correct dashboard
+  return userProfile.role === 'Admin' ? <AdminDashboard /> : <RepDashboard />;
+};
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  userProfile: null,
-  session: null,
-  loading: true,
-
-  // Explicitly checks for an existing session on app startup.
-  checkSession: async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      set({ session, user: session?.user ?? null });
-
-      if (session?.user) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-        
-        if (error && error.code !== 'PGRST116') throw error;
-        set({ userProfile: data || null });
-      } else {
-        set({ userProfile: null });
-      }
-    } catch (error) {
-      console.error("Error checking initial session:", error);
-      set({ user: null, userProfile: null, session: null });
-    } finally {
-      set({ loading: false });
-    }
-  },
-
-  // Sets up the listener for auth changes that happen *after* initial load.
-  setupListener: () => {
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        set({ session, user: session?.user ?? null });
-
-        if (session?.user) {
-          try {
-            const { data, error } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', session.user.id)
-              .single();
-            
-            if (error && error.code !== 'PGRST116') throw error;
-            set({ userProfile: data || null });
-          } catch (error) {
-            console.error("Error fetching profile on auth change:", error);
-            set({ userProfile: null });
-          }
-        } else {
-          set({ userProfile: null });
-        }
-      }
-    );
-    return () => {
-      authListener.subscription.unsubscribe();
-    };
-  },
-
-  signIn: async (email, password) => {
-    return supabase.auth.signInWithPassword({ email, password });
-  },
-
-  signOut: async () => {
-    await supabase.auth.signOut();
-    set({ user: null, userProfile: null, session: null });
-  },
-
-  resetPassword: async (email) => {
-    return supabase.auth.resetPasswordForEmail(email);
-  },
-}));
+export default App;
