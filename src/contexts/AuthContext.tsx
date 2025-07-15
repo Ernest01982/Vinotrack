@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect } from 'react';
+import React, { createContext, useContext } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import type { User, Session, AuthError } from '@supabase/supabase-js';
 import type { UserProfile } from '../types';
@@ -25,20 +25,18 @@ export const useAuth = () => {
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Select the state and actions from the Zustand store
+  // Select the state and actions from the Zustand store.
+  // The 'initialize' function is no longer needed here as it's called
+  // automatically when the store module is first loaded.
   const { 
     user, 
     userProfile, 
     session, 
     loading, 
-    initialize, 
     signIn, 
     signOut, 
     resetPassword 
   } = useAuthStore();
-
-  // The initialize function is now called once when the store is created,
-  // so we no longer need a useEffect here to manage the subscription.
 
   return (
     <AuthContext.Provider value={{ user, userProfile, session, loading, signIn, signOut, resetPassword }}>
