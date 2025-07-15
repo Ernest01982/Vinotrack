@@ -2,13 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, User, Mail, Phone, MapPin, Calendar, Clock, Save, FileText, History, ShoppingCart, Plus, Minus, Download } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { supabase } from '../../lib/supabase';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
-// Extend jsPDF type to include autoTable
+// Extend jsPDF type to include lastAutoTable property added by the autotable plugin
 declare module 'jspdf' {
   interface jsPDF {
-    autoTable: (options: any) => jsPDF;
     lastAutoTable: { finalY: number };
   }
 }
@@ -223,7 +222,7 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
       `R${item.total.toFixed(2)}`
     ]);
     
-    doc.autoTable({
+    autoTable(doc, {
       head: [['Product', 'Quantity', 'Unit Price', 'Total']],
       body: tableData,
       startY: 150,
