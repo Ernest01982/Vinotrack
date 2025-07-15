@@ -1,12 +1,28 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { supabase, UserProfile } from '../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
+ import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../../lib/supabase';
 import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
-import { Users, BarChart3, Wine, TrendingUp, Package, UserPlus, Mail, Upload, CheckCircle, AlertCircle, Calendar, LogOut } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { ArrowLeft, User, Mail, Phone, MapPin, Save, FileText, History, ShoppingCart, Plus, Minus, Download, X } from 'lucide-react';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
-// Type definitions
+// Extend jsPDF type to include autoTable for TypeScript
+declare module 'jspdf' {
+  interface jsPDF {
+    autoTable: (options: any) => jsPDF;
+  }
+}
+
+// Interface definitions
+interface Client {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  address?: string;
+  assigned_rep_id: string;
+  created_at: string;
+}
+
 interface Product {
   id: string;
   name: string;
@@ -15,477 +31,398 @@ interface Product {
   created_at: string;
 }
 
-interface ActivityLog {
-    id: string;
-    type: 'USER_ADDED' | 'PRODUCT_ADDED' | 'REPORT_GENERATED';
-    message: string;
-    created_at: string;
+interface OrderItem {
+  product_id: string;
+  product_name: string;
+  price: number;
+  quantity: number;
+  total: number;
 }
 
-interface ReportStats {
-    totalClients: number;
-    totalProducts: number;
-    newProducts: number;
-    visitsToday: number;
-    visitsWeek: number;
-    visitsMonth: number;
-    onConsumptionClients: number;
-    offConsumptionClients: number;
-    repVisitStats: Array<{
-      rep_id: string;
-      rep_name: string;
-      total_visits: number;
-      avg_duration_minutes: number;
-    }>;
+interface Visit {
+  id: string;
+  client_id: string;
+  rep_id: string;
+  start_time: string;
+  end_time?: string;
+  notes?: string;
+  draft_order_items?: OrderItem[]; // Added for state persistence
+  created_at: string;
 }
 
-export const AdminDashboard: React.FC = () => {
-    const { userProfile, signOut } = useAuth();
-    const [activeTab, setActiveTab] = useState('overview');
-    const [reps, setReps] = useState<UserProfile[]>([]);
-    const [products, setProducts] = useState<Product[]>([]);
-    const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
+interface ActiveVisitScreenProps {
+  visit: Visit;
+  client: Client;
+  onEndVisit: () => void;
+  onBack: () => void;
+}
 
-    // State for modals
-    const [showAddProductModal, setShowAddProductModal] = useState(false);
-    const [showBulkUploadConfirmModal, setShowBulkUploadConfirmModal] = useState(false);
+export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
+  visit,
+  client,
+  onEndVisit,
+  onBack
+}) => {
+  const [activeTab, setActiveTab] = useState('notes');
+  const [notes, setNotes] = useState(visit.notes || '');
+  const [visitHistory, setVisitHistory] = useState<Visit[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [endLoading, setEndLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  
+  // Order tab state
+  const [products, setProducts] = useState<Product[]>([]);
+  const [orderItems, setOrderItems] = useState<OrderItem[]>(visit.draft_order_items || []);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
-    // Form states
-    const [productForm, setProductForm] = useState({ name: '', description: '', price: '' });
-    const [inviteForm, setInviteForm] = useState({ email: '', password: '', fullName: '', role: 'Rep' as 'Rep' | 'Admin' });
-    const [uploadFile, setUploadFile] = useState<File | null>(null);
-    const [uploadType, setUploadType] = useState('Products');
+  // Modal State
+  const [showConfirmOrderModal, setShowConfirmOrderModal] = useState(false);
+
+  // --- State Persistence Logic ---
+
+  // Auto-save notes every 3 seconds
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (notes !== visit.notes) {
+        handleSaveNotes();
+      }
+    }, 3000);
+    return () => clearTimeout(timeoutId);
+  }, [notes, visit.notes]);
+
+  // Save notes before the user leaves the page (e.g., refresh)
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (notes !== visit.notes) {
+        handleSaveNotes();
+        // Note: Most modern browsers will not display this message
+        event.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [notes, visit.notes]);
+
+  // Save draft order whenever it changes
+  const saveDraftOrder = useCallback(async (currentOrderItems: OrderItem[]) => {
+    try {
+      await supabase
+        .from('visits')
+        .update({ draft_order_items: currentOrderItems })
+        .eq('id', visit.id);
+    } catch (err) {
+      console.error("Failed to save draft order:", err);
+      // Non-critical error, so we don't show it to the user
+    }
+  }, [visit.id]);
+
+  // --- End State Persistence Logic ---
+
+  useEffect(() => {
+    if (activeTab === 'history') {
+      fetchVisitHistory();
+    } else if (activeTab === 'order') {
+      fetchProducts();
+    }
+  }, [activeTab, client.id]);
+
+  const fetchVisitHistory = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const { data, error } = await supabase
+        .from('visits')
+        .select('*')
+        .eq('client_id', client.id)
+        .neq('id', visit.id)
+        .order('start_time', { ascending: false });
+
+      if (error) throw error;
+      setVisitHistory(data || []);
+    } catch (err: any) {
+      setError('Failed to fetch visit history');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchProducts = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setProducts(data || []);
+    } catch (err: any) {
+      setError('Failed to fetch products');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateQuantity = (product: Product, quantity: number) => {
+    let updatedOrderItems;
+    if (quantity <= 0) {
+      updatedOrderItems = orderItems.filter(item => item.product_id !== product.id);
+    } else {
+      const total = product.price * quantity;
+      const orderItem: OrderItem = {
+        product_id: product.id,
+        product_name: product.name,
+        price: product.price,
+        quantity,
+        total
+      };
+
+      const existingIndex = orderItems.findIndex(item => item.product_id === product.id);
+      if (existingIndex >= 0) {
+        updatedOrderItems = [...orderItems];
+        updatedOrderItems[existingIndex] = orderItem;
+      } else {
+        updatedOrderItems = [...orderItems, orderItem];
+      }
+    }
+    setOrderItems(updatedOrderItems);
+    saveDraftOrder(updatedOrderItems); // Save draft on change
+  };
+
+  const getQuantity = (productId: string): number => {
+    return orderItems.find(item => item.product_id === productId)?.quantity || 0;
+  };
+
+  const getOrderTotal = (): number => {
+    return orderItems.reduce((sum, item) => sum + item.total, 0);
+  };
+
+  const generatePDF = (orderData: any) => {
+    const doc = new jsPDF();
+    doc.setFontSize(20);
+    doc.setTextColor(128, 0, 128);
+    doc.text('Vino Tracker', 20, 20);
+    doc.setFontSize(16);
+    doc.setTextColor(0, 0, 0);
+    doc.text('Order Confirmation', 20, 35);
+    doc.setFontSize(12);
+    doc.text(Order ID: ${orderData.id}, 20, 50);
+    doc.text(Date: ${new Date(orderData.created_at).toLocaleDateString()}, 20, 60);
+    doc.setFontSize(14);
+    doc.text('Client Information:', 20, 80);
+    doc.setFontSize(12);
+    doc.text(Name: ${client.name}, 20, 90);
+    doc.text(Email: ${client.email}, 20, 100);
     
-    // Loading states
-    const [inviteLoading, setInviteLoading] = useState(false);
-    const [productLoading, setProductLoading] = useState(false);
-    const [uploadLoading, setUploadLoading] = useState(false);
-    const [reportsLoading, setReportsLoading] = useState(false);
+    const tableData = orderItems.map(item => [
+      item.product_name,
+      item.quantity.toString(),
+      R${item.price.toFixed(2)},
+      R${item.total.toFixed(2)}
+    ]);
     
-    // Data states
-    const [uploadResults, setUploadResults] = useState<{ success: number; errors: string[]; total: number } | null>(null);
-    const [reportStats, setReportStats] = useState<ReportStats | null>(null);
-
-    // Fetch initial data
-    useEffect(() => {
-        fetchReps();
-        fetchProducts();
-        fetchActivityLogs();
-    }, []);
-
-    // Fetch reports data when the reports tab is active
-    useEffect(() => {
-        if (activeTab === 'reports' && !reportStats) {
-            fetchReports();
-        }
-    }, [activeTab, reportStats]);
-
-    // Dynamic stats based on fetched data
-    const stats = useMemo(() => [
-        { name: 'Total Users', value: reps.length.toString(), icon: Users },
-        { name: 'Wine Inventory', value: products.length.toString(), icon: Wine },
-        { name: 'Total Admins', value: reps.filter(r => r.role === 'Admin').length.toString(), icon: UserPlus },
-        { name: 'Active Reps', value: reps.filter(r => r.role === 'Rep').length.toString(), icon: Package },
-    ], [reps, products]);
-
-    // Clear success/error messages after a delay
-    useEffect(() => {
-        if (success) {
-            const timer = setTimeout(() => setSuccess(''), 5000);
-            return () => clearTimeout(timer);
-        }
-        if (error) {
-            const timer = setTimeout(() => setError(''), 5000);
-            return () => clearTimeout(timer);
-        }
-    }, [success, error]);
-
-    const fetchReps = async () => {
-        try {
-            const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-            if (error) throw error;
-            setReps(data || []);
-        } catch (err) {
-            setError('Failed to fetch users');
-        }
-    };
-
-    const fetchProducts = async () => {
-        try {
-            const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-            if (error) throw error;
-            setProducts(data || []);
-        } catch (err) {
-            setError('Failed to fetch products');
-        }
-    };
+    doc.autoTable({
+      head: [['Product', 'Quantity', 'Unit Price', 'Total']],
+      body: tableData,
+      startY: 110,
+      theme: 'grid',
+      headStyles: { fillColor: [128, 0, 128] },
+    });
     
-    const fetchActivityLogs = async () => {
-        try {
-            const { data, error } = await supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(5);
-            if (error) throw error;
-            setActivityLogs(data || []);
-        } catch (err) {
-            // It's okay if this fails, not critical
-            console.error('Could not fetch activity logs', err);
-        }
-    };
-
-    const handleInviteRep = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setInviteLoading(true);
-        setError('');
-        setSuccess('');
-
-        try {
-            if (inviteForm.password.length < 6) throw new Error('Password must be at least 6 characters long');
-            
-            const { data: authData, error: authError } = await supabase.auth.signUp({
-                email: inviteForm.email,
-                password: inviteForm.password,
-                options: {
-                    data: {
-                        full_name: inviteForm.fullName,
-                        role: inviteForm.role
-                    }
-                }
-            });
-
-            if (authError) throw authError;
-
-            if (authData.user) {
-                 // The handle_new_user trigger in Supabase should create the profile.
-                setSuccess(`${inviteForm.role} invited successfully!`);
-                setInviteForm({ email: '', password: '', fullName: '', role: 'Rep' });
-                fetchReps();
-                // Log activity
-                await supabase.from('activity_log').insert({ type: 'USER_ADDED', message: `Invited ${inviteForm.role}: ${inviteForm.email}` });
-                fetchActivityLogs();
-            }
-        } catch (err: any) {
-            setError(err.message || 'Failed to invite user');
-        } finally {
-            setInviteLoading(false);
-        }
-    };
-
-    const handleAddProduct = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setProductLoading(true);
-        try {
-            if (!productForm.name.trim() || !productForm.description.trim() || !productForm.price) throw new Error('All product fields are required.');
-            
-            const { error } = await supabase.from('products').insert({
-                name: productForm.name,
-                description: productForm.description,
-                price: parseFloat(productForm.price),
-            });
-            if (error) throw error;
-
-            setSuccess('Product added successfully!');
-            setProductForm({ name: '', description: '', price: '' });
-            setShowAddProductModal(false);
-            fetchProducts();
-            // Log activity
-            await supabase.from('activity_log').insert({ type: 'PRODUCT_ADDED', message: `Added product: ${productForm.name}` });
-            fetchActivityLogs();
-        } catch (err: any) {
-            setError(err.message || 'Failed to add product');
-        } finally {
-            setProductLoading(false);
-        }
-    };
+    const finalY = (doc as any).lastAutoTable.finalY;
+    doc.setFontSize(14);
+    doc.text(Order Total: R${getOrderTotal().toFixed(2)}, 20, finalY + 15);
     
-    const triggerBulkUpload = async () => {
-        setShowBulkUploadConfirmModal(false);
-        if (!uploadFile) return;
+    doc.save(Order_${orderData.id}_${client.name.replace(/\s+/g, '_')}.pdf);
+  };
 
-        setUploadLoading(true);
-        setUploadResults(null);
-        setError('');
+  const handlePlaceOrder = async () => {
+    setShowConfirmOrderModal(false);
+    if (orderItems.length === 0) {
+      setError('Please add items to your order.');
+      return;
+    }
 
-        try {
-            const data = await uploadFile.arrayBuffer();
-            const workbook = XLSX.read(data);
-            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet);
+    setPdfLoading(true);
+    setError('');
+    try {
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .insert({
+          client_id: client.id,
+          rep_id: visit.rep_id,
+          visit_id: visit.id,
+          total_amount: getOrderTotal(),
+          items: orderItems,
+        })
+        .select()
+        .single();
 
-            if (jsonData.length === 0) throw new Error('The uploaded file is empty or invalid.');
+      if (orderError) throw orderError;
 
-            let successCount = 0;
-            const errors: string[] = [];
+      // This line is now re-enabled
+      generatePDF(order);
+      
+      setOrderItems([]);
+      await saveDraftOrder([]); // Clear the draft order
+      setSuccess('Order placed successfully and PDF downloaded!');
+      
+    } catch (err: any) {
+      setError('Failed to place order.');
+      console.error('Order placement or PDF generation error:', err);
+    } finally {
+      setPdfLoading(false);
+    }
+  };
 
-            for (const [index, row] of jsonData.entries()) {
-                try {
-                    if (uploadType === 'Products') {
-                        const product = row as any;
-                        if (!product.name || !product.description || product.price == null) throw new Error("Row is missing 'name', 'description', or 'price'.");
-                        const { error: insertError } = await supabase.from('products').insert({ name: String(product.name), description: String(product.description), price: parseFloat(product.price) });
-                        if (insertError) throw insertError;
-                    } else if (uploadType === 'Clients') {
-                        const client = row as any;
-                        if (!client.name || !client.email || !client.assigned_rep_id) throw new Error("Row is missing 'name', 'email', or 'assigned_rep_id'.");
-                        const { error: insertError } = await supabase.from('clients').insert({
-                            name: String(client.name),
-                            email: String(client.email),
-                            phone: client.phone ? String(client.phone) : null,
-                            address: client.address ? String(client.address) : null,
-                            consumption_type: client.consumption_type === 'off-consumption' ? 'off-consumption' : 'on-consumption',
-                            call_frequency: client.call_frequency ? parseInt(client.call_frequency) : 1,
-                            assigned_rep_id: String(client.assigned_rep_id),
-                        });
-                        if (insertError) throw insertError;
-                    }
-                    successCount++;
-                } catch (err: any) {
-                    errors.push(`Row ${index + 2}: ${err.message}`);
-                }
-            }
+  const handleSaveNotes = async () => {
+    setSaveLoading(true);
+    try {
+      const { error } = await supabase
+        .from('visits')
+        .update({ notes })
+        .eq('id', visit.id);
 
-            setUploadResults({ success: successCount, errors, total: jsonData.length });
-            if (uploadType === 'Products') fetchProducts();
-            // You might want to fetch clients here if you implement a client list view
-            
-        } catch (err: any) {
-            setError(err.message || 'Failed to process file');
-        } finally {
-            setUploadLoading(false);
-            setUploadFile(null);
-            const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-            if (fileInput) fileInput.value = '';
-        }
-    };
+      if (error) throw error;
+      setSuccess('Notes saved.');
+    } catch (err: any) {
+      setError('Failed to save notes');
+    } finally {
+      setSaveLoading(false);
+    }
+  };
 
-    const fetchReports = async () => {
-        setReportsLoading(true);
-        setError('');
-        try {
-            // Fetch data sequentially to reduce load on the database and prevent timeouts
-            const clientsRes = await supabase.from('clients').select('id, consumption_type', { count: 'exact' });
-            if (clientsRes.error) throw new Error(`Failed to fetch client data: ${clientsRes.error.message}`);
+  const handleEndVisit = async () => {
+    setEndLoading(true);
+    try {
+      await handleSaveNotes();
+      const { error } = await supabase
+        .from('visits')
+        .update({ end_time: new Date().toISOString() })
+        .eq('id', visit.id);
 
-            const productsRes = await supabase.from('products').select('id, created_at', { count: 'exact' });
-            if (productsRes.error) throw new Error(`Failed to fetch product data: ${productsRes.error.message}`);
+      if (error) throw error;
+      setSuccess('Visit ended successfully!');
+      setTimeout(onEndVisit, 1000);
+    } catch (err: any) {
+      setError('Failed to end visit');
+    } finally {
+      setEndLoading(false);
+    }
+  };
 
-            const visitsRes = await supabase.from('visits').select('id, start_time, end_time, rep_id, profiles!visits_rep_id_fkey(full_name)');
-            if (visitsRes.error) throw new Error(`Failed to fetch visit data: ${visitsRes.error.message}`);
+  return (
+    <>
+      <div className="min-h-screen bg-gray-900">
+        <header className="bg-gray-800 border-b border-gray-700">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+            <Button onClick={onBack} variant="outline" size="sm"><ArrowLeft className="h-4 w-4 mr-2" />Back</Button>
+            <h1 className="text-xl font-bold text-white">Active Visit</h1>
+            <Button onClick={handleEndVisit} loading={endLoading} className="bg-red-600 hover:bg-red-700">End Visit</Button>
+          </div>
+        </header>
 
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {error && <div className="bg-red-900 border border-red-700 text-red-100 px-4 py-3 rounded mb-6">{error}</div>}
+          {success && <div className="bg-green-800 border border-green-600 text-green-200 px-4 py-3 rounded mb-6">{success}</div>}
+          
+          <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-8">
+            <div className="flex items-center space-x-3 mb-4">
+                <User className="h-5 w-5 text-purple-400" />
+                <h2 className="text-lg font-semibold text-white">Client: {client.name}</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div className="flex items-center text-gray-300"><Mail className="h-4 w-4 mr-3 text-purple-400" /><span>{client.email}</span></div>
+                {client.phone && <div className="flex items-center text-gray-300"><Phone className="h-4 w-4 mr-3 text-purple-400" /><span>{client.phone}</span></div>}
+                {client.address && <div className="flex items-center text-gray-300 md:col-span-2"><MapPin className="h-4 w-4 mr-3 text-purple-400" /><span>{client.address}</span></div>}
+            </div>
+          </div>
 
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            const weekAgo = new Date();
-            weekAgo.setDate(weekAgo.getDate() - 7);
-
-            const visits = visitsRes.data || [];
-            
-            const repVisitStats = visits.reduce((acc: any, visit) => {
-                const repId = visit.rep_id;
-                if (!acc[repId]) {
-                    acc[repId] = { rep_id: repId, rep_name: (visit.profiles as any)?.full_name || 'Unknown', total_visits: 0, total_duration: 0 };
-                }
-                acc[repId].total_visits++;
-                if (visit.end_time) {
-                    acc[repId].total_duration += new Date(visit.end_time).getTime() - new Date(visit.start_time).getTime();
-                }
-                return acc;
-            }, {});
-
-            setReportStats({
-                totalClients: clientsRes.count || 0,
-                totalProducts: productsRes.count || 0,
-                newProducts: productsRes.data?.filter(p => new Date(p.created_at) > thirtyDaysAgo).length || 0,
-                visitsToday: visits.filter(v => new Date(v.start_time) >= today).length,
-                visitsWeek: visits.filter(v => new Date(v.start_time) >= weekAgo).length,
-                visitsMonth: visits.filter(v => new Date(v.start_time) >= thirtyDaysAgo).length,
-                onConsumptionClients: clientsRes.data?.filter(c => c.consumption_type === 'on-consumption').length || 0,
-                offConsumptionClients: clientsRes.data?.filter(c => c.consumption_type === 'off-consumption').length || 0,
-                repVisitStats: Object.values(repVisitStats).map((stat: any) => ({
-                    ...stat,
-                    avg_duration_minutes: stat.total_visits > 0 ? Math.round(stat.total_duration / stat.total_visits / 60000) : 0
-                }))
-            });
-        } catch (err: any) {
-            setError(err.message || 'Failed to fetch reports');
-        } finally {
-            setReportsLoading(false);
-        }
-    };
-    
-    // Render Functions for each tab
-    const renderOverview = () => (
-        <div className="space-y-8">
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                {stats.map((item) => (
-                    <div key={item.name} className="bg-gray-800 overflow-hidden shadow rounded-lg border border-gray-700">
-                        <div className="p-5 flex items-center">
-                            <div className="flex-shrink-0 bg-purple-600/20 p-3 rounded-lg"><item.icon className="h-6 w-6 text-purple-400" /></div>
-                            <div className="ml-5 w-0 flex-1">
-                                <dt className="text-sm font-medium text-gray-400 truncate">{item.name}</dt>
-                                <dd className="text-2xl font-bold text-white">{item.value}</dd>
+          <div className="bg-gray-800 rounded-lg border border-gray-700">
+            <nav className="border-b border-gray-700 flex space-x-8 px-6">
+              <button onClick={() => setActiveTab('notes')} className={py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notes' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}}>Notes</button>
+              <button onClick={() => setActiveTab('order')} className={py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'order' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}}>Order</button>
+              <button onClick={() => setActiveTab('history')} className={py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'history' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}}>History</button>
+            </nav>
+            <div className="p-6">
+              {activeTab === 'notes' && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium text-white">Visit Notes</h3>
+                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Enter visit notes..." className="w-full h-64 p-3 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                  <Button onClick={handleSaveNotes} loading={saveLoading}><Save className="h-4 w-4 mr-2" />Save Notes</Button>
+                </div>
+              )}
+              {activeTab === 'order' && (
+                <div className="space-y-6">
+                  <h3 className="text-lg font-medium text-white">Place Order</h3>
+                  {orderItems.length > 0 && (
+                    <div className="bg-gray-700 rounded-lg p-4 border border-gray-600">
+                      <h4 className="text-white font-medium mb-3">Order Summary</h4>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {orderItems.map(item => <div key={item.product_id} className="flex justify-between text-sm"><span>{item.product_name} x{item.quantity}</span><span>R{item.total.toFixed(2)}</span></div>)}
+                      </div>
+                      <div className="border-t border-gray-600 mt-3 pt-3 flex justify-between items-center">
+                        <span className="text-lg font-bold text-green-400">Total: R{getOrderTotal().toFixed(2)}</span>
+                        <Button onClick={() => setShowConfirmOrderModal(true)} loading={pdfLoading} className="bg-green-600 hover:bg-green-700"><Download className="h-4 w-4 mr-2" />Place Order & Get PDF</Button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="space-y-4">
+                    <h4 className="text-white font-medium">Available Products</h4>
+                    {loading ? <p>Loading products...</p> : (
+                      <div className="grid grid-cols-1 gap-4">
+                        {products.map((product) => (
+                          <div key={product.id} className="bg-gray-700 rounded-lg p-4 border border-gray-600 flex items-center justify-between">
+                            <div>
+                              <h5 className="text-white font-medium">{product.name}</h5>
+                              <p className="text-green-400 font-bold">R{product.price.toFixed(2)}</p>
                             </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 bg-gray-800 shadow rounded-lg border border-gray-700 p-6">
-                     <h3 className="text-lg leading-6 font-medium text-white mb-4">Quick Actions</h3>
-                     <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <Button onClick={() => setActiveTab('reps')} className="bg-purple-600 hover:bg-purple-700"><UserPlus className="h-5 w-5 mr-2" />Manage Users</Button>
-                        <Button onClick={() => setActiveTab('inventory')} className="bg-blue-600 hover:bg-blue-700"><Package className="h-5 w-5 mr-2" />Manage Inventory</Button>
-                        <Button onClick={() => setActiveTab('bulk-upload')} className="bg-green-600 hover:bg-green-700"><Upload className="h-5 w-5 mr-2" />Bulk Upload Data</Button>
-                        <Button onClick={() => setActiveTab('reports')} className="bg-orange-600 hover:bg-orange-700"><BarChart3 className="h-5 w-5 mr-2" />View Reports</Button>
-                    </div>
-                </div>
-                <div className="bg-gray-800 shadow rounded-lg border border-gray-700 p-6">
-                    <h3 className="text-lg leading-6 font-medium text-white mb-4">Recent Activity</h3>
-                    <div className="mt-5 space-y-4">
-                        {activityLogs.length > 0 ? activityLogs.map(log => (
-                            <div key={log.id} className="flex items-center space-x-3">
-                                <div className="flex-shrink-0"><CheckCircle className="h-5 w-5 text-green-400" /></div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-gray-300">{log.message}</p>
-                                    <p className="text-xs text-gray-500">{new Date(log.created_at).toLocaleString()}</p>
-                                </div>
+                            <div className="flex items-center space-x-3">
+                              <Button onClick={() => updateQuantity(product, getQuantity(product.id) - 1)} size="sm" variant="outline" disabled={getQuantity(product.id) <= 0}><Minus className="h-3 w-3" /></Button>
+                              <span className="text-white font-medium w-8 text-center">{getQuantity(product.id)}</span>
+                              <Button onClick={() => updateQuantity(product, getQuantity(product.id) + 1)} size="sm" variant="outline"><Plus className="h-3 w-3" /></Button>
                             </div>
-                        )) : <p className="text-sm text-gray-500">No recent activity.</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {activeTab === 'history' && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium text-white">Visit History</h3>
+                  {loading ? <p>Loading history...</p> : visitHistory.length === 0 ? <p>No previous visits.</p> : (
+                    <div className="space-y-3">
+                      {visitHistory.map(v => <div key={v.id} className="bg-gray-700 p-4 rounded-lg"><p className="font-medium text-white">{new Date(v.start_time).toLocaleString()}</p><p className="text-sm text-gray-300 whitespace-pre-wrap">{v.notes || 'No notes for this visit.'}</p></div>)}
                     </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
+
+      {showConfirmOrderModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700">
+                <h3 className="text-lg font-medium text-white mb-2">Confirm Order</h3>
+                <p className="text-sm text-gray-400 mb-4">Are you sure you want to place this order for <span className="font-bold text-green-400">R{getOrderTotal().toFixed(2)}</span>? A PDF receipt will be generated.</p>
+                <div className="flex justify-end space-x-3 pt-4">
+                    <Button type="button" onClick={() => setShowConfirmOrderModal(false)} variant="secondary">Cancel</Button>
+                    <Button onClick={handlePlaceOrder} className="bg-green-600 hover:bg-green-700">Yes, Place Order</Button>
                 </div>
             </div>
         </div>
-    );
-
-    const renderRepsTab = () => (
-        <div className="space-y-6">
-            <div className="bg-gray-800 shadow rounded-lg border border-gray-700 p-6">
-                <h3 className="text-lg font-medium text-white mb-4">Invite New User</h3>
-                <form onSubmit={handleInviteRep} className="space-y-4">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <Input label="Email" type="email" value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} required />
-                        <Input label="Full Name" type="text" value={inviteForm.fullName} onChange={(e) => setInviteForm({ ...inviteForm, fullName: e.target.value })} required />
-                    </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <Input label="Password (min. 6 characters)" type="password" value={inviteForm.password} onChange={(e) => setInviteForm({ ...inviteForm, password: e.target.value })} required />
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Role</label>
-                            <select value={inviteForm.role} onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value as 'Rep' | 'Admin' })} className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                <option value="Rep">Rep</option>
-                                <option value="Admin">Admin</option>
-                            </select>
-                        </div>
-                    </div>
-                    <Button type="submit" loading={inviteLoading} className="bg-purple-600 hover:bg-purple-700">Invite User</Button>
-                </form>
-            </div>
-            <div className="bg-gray-800 shadow rounded-lg border border-gray-700">
-                <div className="px-4 py-5 sm:p-6">
-                    <h3 className="text-lg font-medium text-white mb-4">All Users</h3>
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-600">
-                            <thead className="bg-gray-700"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Role</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th></tr></thead>
-                            <tbody className="bg-gray-800 divide-y divide-gray-600">{reps.map((rep) => (<tr key={rep.id}><td className="px-6 py-4 whitespace-nowrap text-sm text-white">{rep.full_name || 'N/A'}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{rep.email}</td><td className="px-6 py-4 whitespace-nowrap"><span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${rep.role === 'Admin' ? 'bg-purple-200 text-purple-800' : 'bg-green-200 text-green-800'}`}>{rep.role}</span></td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{rep.created_at ? new Date(rep.created_at).toLocaleDateString() : 'N/A'}</td></tr>))}</tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-
-    const renderInventoryTab = () => (
-        <div className="space-y-6">
-             <div className="flex justify-between items-center"><h2 className="text-2xl font-bold text-white">Product Inventory</h2><Button onClick={() => setShowAddProductModal(true)} className="bg-purple-600 hover:bg-purple-700"><Package className="h-4 w-4 mr-2" />Add Product</Button></div>
-             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                {products.map((product) => (
-                    <div key={product.id} className="bg-gray-800 shadow rounded-lg border border-gray-700 p-6">
-                        <h3 className="text-lg font-medium text-white mb-2">{product.name}</h3>
-                        <p className="text-gray-300 text-sm mb-4">{product.description}</p>
-                        <div className="flex justify-between items-center">
-                            <span className="text-2xl font-bold text-purple-400">{`R${product.price.toFixed(2)}`}</span>
-                            <span className="text-xs text-gray-500">{new Date(product.created_at).toLocaleDateString()}</span>
-                        </div>
-                    </div>
-                ))}
-             </div>
-        </div>
-    );
-
-    const renderBulkUploadTab = () => (
-        <div className="bg-gray-800 shadow rounded-lg border border-gray-700 p-6 space-y-6">
-            <h3 className="text-lg font-medium text-white">Bulk Upload Data</h3>
-            <div className="space-y-4">
-                <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1">Upload Type</label>
-                    <select value={uploadType} onChange={(e) => setUploadType(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500"><option value="Products">Products</option><option value="Clients">Clients</option></select>
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1">Excel File (.xlsx)</label>
-                    <p className="text-sm text-gray-400 mb-2">{uploadType === 'Products' ? "Columns: name, description, price" : "Columns: name, email, phone, address, consumption_type, call_frequency, assigned_rep_id"}</p>
-                    <input type="file" accept=".xlsx,.xls" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} className="w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-purple-600 file:text-white hover:file:bg-purple-700" />
-                </div>
-                <Button onClick={() => setShowBulkUploadConfirmModal(true)} disabled={!uploadFile || uploadLoading} className="bg-purple-600 hover:bg-purple-700"><Upload className="h-4 w-4 mr-2" />{uploadLoading ? 'Uploading...' : `Upload ${uploadType}`}</Button>
-            </div>
-            {uploadResults && (<div className="mt-6 p-4 bg-gray-700 rounded-lg"><h4 className="text-white font-medium mb-2">Upload Results</h4><div className="space-y-2"><p className="text-green-400 flex items-center"><CheckCircle className="h-4 w-4 mr-2" />Successfully processed: {uploadResults.success}/{uploadResults.total}</p>{uploadResults.errors.length > 0 && (<div><p className="text-red-400 mb-1 flex items-center"><AlertCircle className="h-4 w-4 mr-2" />Errors:</p><ul className="text-sm text-gray-300 space-y-1 max-h-32 overflow-y-auto pl-5">{uploadResults.errors.slice(0, 10).map((error, index) => (<li key={index} className="list-disc">{error}</li>))}{uploadResults.errors.length > 10 && (<li>... and {uploadResults.errors.length - 10} more errors</li>)}</ul></div>)}</div></div>)}
-        </div>
-    );
-
-    const renderReportsTab = () => (
-        <div className="space-y-6">
-            <div className="flex justify-between items-center"><h2 className="text-2xl font-bold text-white">Analytics & Reports</h2><Button onClick={fetchReports} loading={reportsLoading} className="bg-purple-600 hover:bg-purple-700"><BarChart3 className="h-4 w-4 mr-2" />{reportsLoading ? 'Refreshing...' : 'Refresh Data'}</Button></div>
-            {reportsLoading && !reportStats ? <div className="text-center py-12"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div><p className="mt-4 text-gray-400">Generating reports...</p></div> : null}
-            {reportStats && (<>
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="bg-gray-800 p-5 rounded-lg border border-gray-700 flex items-center"><Users className="h-8 w-8 text-blue-400" /><div className="ml-4"><p className="text-sm font-medium text-gray-400">Total Clients</p><p className="text-2xl font-semibold text-white">{reportStats.totalClients}</p></div></div>
-                    <div className="bg-gray-800 p-5 rounded-lg border border-gray-700 flex items-center"><Package className="h-8 w-8 text-green-400" /><div className="ml-4"><p className="text-sm font-medium text-gray-400">Total Products</p><p className="text-2xl font-semibold text-white">{reportStats.totalProducts}</p></div></div>
-                    <div className="bg-gray-800 p-5 rounded-lg border border-gray-700 flex items-center"><TrendingUp className="h-8 w-8 text-purple-400" /><div className="ml-4"><p className="text-sm font-medium text-gray-400">New Products (30d)</p><p className="text-2xl font-semibold text-white">{reportStats.newProducts}</p></div></div>
-                    <div className="bg-gray-800 p-5 rounded-lg border border-gray-700 flex items-center"><Calendar className="h-8 w-8 text-orange-400" /><div className="ml-4"><p className="text-sm font-medium text-gray-400">Visits Today</p><p className="text-2xl font-semibold text-white">{reportStats.visitsToday}</p></div></div>
-                </div>
-                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                    <div className="bg-gray-800 p-6 rounded-lg border border-gray-700"><h3 className="text-lg font-medium text-white mb-4">Visit Statistics</h3><div className="space-y-4"><div className="flex justify-between"><span className="text-gray-300">This Week</span><span className="text-white font-semibold">{reportStats.visitsWeek}</span></div><div className="flex justify-between"><span className="text-gray-300">This Month</span><span className="text-white font-semibold">{reportStats.visitsMonth}</span></div><div className="flex justify-between"><span className="text-gray-300">On-Consumption Clients</span><span className="text-white font-semibold">{reportStats.onConsumptionClients}</span></div><div className="flex justify-between"><span className="text-gray-300">Off-Consumption Clients</span><span className="text-white font-semibold">{reportStats.offConsumptionClients}</span></div></div></div>
-                    <div className="bg-gray-800 p-6 rounded-lg border border-gray-700"><h3 className="text-lg font-medium text-white mb-4">Rep Performance</h3><div className="space-y-3">{reportStats.repVisitStats.length > 0 ? reportStats.repVisitStats.slice(0, 5).map((rep) => (<div key={rep.rep_id} className="flex justify-between items-center"><div><p className="text-white font-medium">{rep.rep_name}</p><p className="text-sm text-gray-400">{rep.total_visits} visits</p></div><div className="text-right"><p className="text-purple-400 font-semibold">{rep.avg_duration_minutes}m</p><p className="text-xs text-gray-500">avg duration</p></div></div>)) : <p className="text-sm text-gray-500">No visit data available.</p>}</div></div>
-                </div>
-            </>)}
-    </div>
-    );
-
-    // Main component render
-    return (
-        <div className="min-h-screen bg-gray-900 text-white">
-            <header className="bg-gray-800 shadow-md">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-                    <div>
-                        <h1 className="text-2xl font-bold text-white">Admin Dashboard</h1>
-                        <p className="text-sm text-gray-400">Welcome, {userProfile?.full_name || 'Admin'}</p>
-                    </div>
-                    <Button onClick={signOut} variant="outline" size="sm"><LogOut className="h-4 w-4 mr-2" />Sign Out</Button>
-                </div>
-            </header>
-
-            {/* Global Messages */}
-            {error && (<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4"><div className="bg-red-800 border border-red-600 text-red-200 px-4 py-3 rounded animate-pulse">{error}</div></div>)}
-            {success && (<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4"><div className="bg-green-800 border border-green-600 text-green-200 px-4 py-3 rounded animate-pulse">{success}</div></div>)}
-            
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-8 border-b border-gray-700"><nav className="flex space-x-8"><button onClick={() => setActiveTab('overview')} className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'overview' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Overview</button><button onClick={() => setActiveTab('reps')} className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'reps' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Users</button><button onClick={() => setActiveTab('inventory')} className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'inventory' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Inventory</button><button onClick={() => setActiveTab('bulk-upload')} className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'bulk-upload' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Bulk Upload</button><button onClick={() => setActiveTab('reports')} className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'reports' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Reports</button></nav></div>
-                
-                {/* Render active tab content */}
-                {activeTab === 'overview' && renderOverview()}
-                {activeTab === 'reps' && renderRepsTab()}
-                {activeTab === 'inventory' && renderInventoryTab()}
-                {activeTab === 'bulk-upload' && renderBulkUploadTab()}
-                {activeTab === 'reports' && renderReportsTab()}
-            </main>
-
-            {/* Add Product Modal */}
-            {showAddProductModal && (<div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"><div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700"><h3 className="text-lg font-medium text-white mb-4">Add New Product</h3><form onSubmit={handleAddProduct} className="space-y-4"><Input label="Product Name" type="text" value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} required /><div><label className="block text-sm font-medium text-gray-300 mb-1">Description</label><textarea value={productForm.description} onChange={(e) => setProductForm({ ...productForm, description: e.target.value })} className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500" rows={3} required /></div><Input label="Price (R)" type="number" step="0.01" value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} required /><div className="flex space-x-3 pt-4"><Button type="button" onClick={() => setShowAddProductModal(false)} variant="secondary" className="flex-1">Cancel</Button><Button type="submit" loading={productLoading} className="bg-purple-600 hover:bg-purple-700 flex-1">Add Product</Button></div></form></div></div>)}
-            
-            {/* Bulk Upload Confirmation Modal */}
-            {showBulkUploadConfirmModal && (<div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"><div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700"><h3 className="text-lg font-medium text-white mb-2">Confirm Upload</h3><p className="text-sm text-gray-400 mb-4">Are you sure you want to upload {uploadFile?.name}? This will add new records to your database and cannot be undone.</p><div className="flex space-x-3 pt-4"><Button type="button" onClick={() => setShowBulkUploadConfirmModal(false)} variant="secondary" className="flex-1">Cancel</Button><Button onClick={triggerBulkUpload} className="bg-red-600 hover:bg-red-700 flex-1">Yes, Upload</Button></div></div></div>)}
-        </div>
-    );
+      )}
+    </>
+  );
 };
+
+
