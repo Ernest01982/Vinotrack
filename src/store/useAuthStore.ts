@@ -9,37 +9,54 @@ interface AuthState {
   session: Session | null;
   loading: boolean;
   
-  initialize: () => () => void; // Returns the unsubscribe function
+  checkSession: () => Promise<void>;
+  setupListener: () => () => void; // Returns the unsubscribe function
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   userProfile: null,
   session: null,
   loading: true,
 
-  initialize: () => {
-    // Fail-safe timeout: If auth state is not resolved in 10 seconds, stop loading.
-    const loadingTimeout = setTimeout(() => {
-      if (get().loading) {
-        console.error("Authentication timeout. Check Supabase connection.");
-        set({ loading: false });
-      }
-    }, 10000);
+  // Explicitly checks for an existing session on app startup.
+  checkSession: async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      set({ session, user: session?.user ?? null });
 
+      if (session?.user) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        
+        if (error && error.code !== 'PGRST116') throw error;
+        set({ userProfile: data || null });
+      } else {
+        set({ userProfile: null });
+      }
+    } catch (error) {
+      console.error("Error checking initial session:", error);
+      set({ user: null, userProfile: null, session: null });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  // Sets up the listener for auth changes that happen *after* initial load.
+  setupListener: () => {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
-        // Clear the timeout once the listener fires.
-        clearTimeout(loadingTimeout);
+        set({ session, user: session?.user ?? null });
 
-        try {
-          set({ session, user: session?.user ?? null });
-
-          // Fetch user profile if a user exists
-          if (session?.user) {
+        if (session?.user) {
+          try {
             const { data, error } = await supabase
               .from('profiles')
               .select('*')
@@ -48,23 +65,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             
             if (error && error.code !== 'PGRST116') throw error;
             set({ userProfile: data || null });
-          } else {
-            // If there's no session, ensure profile is also null
+          } catch (error) {
+            console.error("Error fetching profile on auth change:", error);
             set({ userProfile: null });
           }
-        } catch (error) {
-          console.error("Error in onAuthStateChange handler:", error);
+        } else {
           set({ userProfile: null });
-        } finally {
-          // Ensure loading is always set to false after the first check.
-          set({ loading: false });
         }
       }
     );
-    
-    // Return the unsubscribe function for cleanup
     return () => {
-      clearTimeout(loadingTimeout);
       authListener.subscription.unsubscribe();
     };
   },
@@ -75,7 +85,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signOut: async () => {
     await supabase.auth.signOut();
-    // Manually clear state on sign out to ensure UI updates immediately
     set({ user: null, userProfile: null, session: null });
   },
 
