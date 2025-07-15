@@ -209,6 +209,17 @@ This is a commercial application. All rights reserved.
 
 This is a commercial product. For feature requests or bug reports, please contact the development team.
 
+## Environment Tips
+
+When working in Codex the shell limits each line of output. If a command prints
+over 1600 bytes in a single line, the session closes. Use tools such as
+
+```bash
+grep -nE 'PATTERN' FILE | cut -c1-200
+```
+
+to keep line lengths short when inspecting large files.
+
 ---
 
 **Vino Tracker** - Professional wine sales management made simple.
