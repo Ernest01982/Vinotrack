@@ -92,3 +92,4 @@ export const useAuthStore = create<AuthState>((set) => ({
     return supabase.auth.resetPasswordForEmail(email);
   },
 }));
+
