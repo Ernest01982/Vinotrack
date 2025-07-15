@@ -4,50 +4,13 @@ import { Button } from '../ui/Button';
 import { supabase } from '../../lib/supabase';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import type { Client, Product, OrderItem, Visit } from '../../types';
 
 // Extend jsPDF type to include lastAutoTable property added by the autotable plugin
 declare module 'jspdf' {
   interface jsPDF {
     lastAutoTable: { finalY: number };
   }
-}
-
-interface Client {
-  id: string;
-  name: string;
-  email: string;
-  phone?: string;
-  address?: string;
-  assigned_rep_id: string;
-  created_at: string;
-}
-
-interface Product {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  created_at: string;
-}
-
-interface OrderItem {
-  product_id: string;
-  product_name: string;
-  price: number;
-  quantity: number;
-  total: number;
-}
-
-interface Visit {
-  id: string;
-  client_id: string;
-  rep_id: string;
-  start_time: string;
-  end_time?: string;
-  latitude?: number;
-  longitude?: number;
-  notes?: string;
-  created_at: string;
 }
 
 interface ActiveVisitScreenProps {
