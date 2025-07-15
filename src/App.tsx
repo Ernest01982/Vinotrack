@@ -4,9 +4,10 @@ import { AdminDashboard } from './components/dashboards/AdminDashboard';
 import RepDashboard from './components/dashboards/RepDashboard';
 import { LoginForm } from './components/auth/LoginForm';
 import { ForgotPasswordForm } from './components/auth/ForgotPasswordForm';
+import { Button } from './components/ui/Button'; // Import the Button component
 
 const AppContent: React.FC = () => {
-  const { user, userProfile, loading } = useAuth();
+  const { user, userProfile, loading, signOut } = useAuth(); // Get signOut from the context
   const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   // Initial loading state for the whole application
@@ -31,16 +32,18 @@ const AppContent: React.FC = () => {
       : <LoginForm onForgotPassword={() => setShowForgotPassword(true)} />;
   }
 
-  // If user is logged in, but we are still waiting for the profile
+  // If user is logged in, but the profile is missing (this is now an error state, not a loading state)
   if (!userProfile) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center text-center">
         <div>
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-          <div className="space-y-2">
-            <h2 className="text-xl font-bold text-white">Loading Profile</h2>
-            <p className="text-gray-400">Setting up your dashboard...</p>
-          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Profile Error</h2>
+          <p className="text-gray-400 mb-6 max-w-sm">
+            We couldn't load your user profile. This can happen if the profile is missing or due to a network issue. Please try signing out and back in, or contact support if the problem persists.
+          </p>
+          <Button onClick={signOut} variant="secondary" size="lg">
+            Sign Out
+          </Button>
         </div>
       </div>
     );
