@@ -71,5 +71,4 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 }));
 
-// Initialize the auth listener when the store is first imported
-useAuthStore.getState().initialize();
+// We no longer initialize here. This will be handled in the AuthProvider.
