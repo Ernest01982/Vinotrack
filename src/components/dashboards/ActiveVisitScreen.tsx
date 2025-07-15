@@ -746,4 +746,3 @@ export const ActiveVisitScreen: React.FC<ActiveVisitScreenProps> = ({
     </div>
   );
 };
-};
