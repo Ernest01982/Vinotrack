@@ -55,4 +55,5 @@ export interface OrderItem {
   price: number;
   quantity: number;
   total: number;
+  is_free_stock?: boolean; // New field for free stock
 }
