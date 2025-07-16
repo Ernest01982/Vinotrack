@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, BarChart3, Wine, TrendingUp, Package, UserPlus, Mail, Upload, FileSpreadsheet, CheckCircle, AlertCircle, Calendar } from 'lucide-react';
+import { Users, Wine, TrendingUp, Package, Mail, Upload, FileSpreadsheet, CheckCircle, AlertCircle, Calendar, LogOut } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -10,7 +10,7 @@ import { useProducts } from '../../hooks/useProducts';
 import type { UserProfile } from '../../types';
 
 export const AdminDashboard: React.FC = () => {
-    const { userProfile } = useAuth();
+    const { userProfile, signOut } = useAuth();
     const [activeTab, setActiveTab] = useState('overview');
 
     // Data hooks
@@ -37,7 +37,6 @@ export const AdminDashboard: React.FC = () => {
     const [reportStats, setReportStats] = useState<any | null>(null);
     const [reportsLoading, setReportsLoading] = useState(true);
 
-    // Fetch reports on initial load and when the tab is active
     const fetchReports = useCallback(async () => {
         setReportsLoading(true);
         setError('');
@@ -189,7 +188,6 @@ export const AdminDashboard: React.FC = () => {
         }
     };
     
-    // JSX Rendering functions for each tab
     const renderOverview = () => {
         const stats = [
             { name: 'Total Users', value: reps.length.toString(), icon: Users },
@@ -377,23 +375,34 @@ export const AdminDashboard: React.FC = () => {
     };
     
     return (
-        <div className="min-h-screen bg-gray-900">
-            {error && (<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4"><div className="bg-red-800 border border-red-600 text-red-200 px-4 py-3 rounded">{error}</div></div>)}
-            {success && (<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4"><div className="bg-green-800 border border-green-600 text-green-200 px-4 py-3 rounded">{success}</div></div>)}
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-8">
-                    <h2 className="text-3xl font-bold text-white">Admin Dashboard</h2>
-                    <p className="text-gray-400">Welcome, {userProfile?.full_name}</p>
+        <div className="min-h-screen bg-gray-900 text-white">
+            <header className="bg-gray-800 shadow-md">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+                    <div>
+                        <h1 className="text-2xl font-bold text-white">VinoTracker Admin</h1>
+                        <p className="text-sm text-gray-400">Welcome, {userProfile?.full_name || 'Admin'}</p>
+                    </div>
+                    <Button onClick={signOut} variant="outline" size="sm">
+                        <LogOut className="h-4 w-4 mr-2" />
+                        Sign Out
+                    </Button>
                 </div>
+            </header>
+            
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                {error && (<div className="bg-red-800 border border-red-600 text-red-200 px-4 py-3 rounded mb-6">{error}</div>)}
+                {success && (<div className="bg-green-800 border border-green-600 text-green-200 px-4 py-3 rounded mb-6">{success}</div>)}
+
                 <div className="border-b border-gray-700 mb-8">
-                    <nav className="flex space-x-8">
-                        <button onClick={() => setActiveTab('overview')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'overview' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Overview</button>
-                        <button onClick={() => setActiveTab('reps')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'reps' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Users</button>
-                        <button onClick={() => setActiveTab('inventory')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'inventory' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Inventory</button>
-                        <button onClick={() => setActiveTab('bulk-upload')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'bulk-upload' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Bulk Upload</button>
-                        <button onClick={() => setActiveTab('reports')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'reports' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Reports</button>
+                    <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+                        <button onClick={() => setActiveTab('overview')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'overview' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}>Overview</button>
+                        <button onClick={() => setActiveTab('reps')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'reps' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}>Users</button>
+                        <button onClick={() => setActiveTab('inventory')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'inventory' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}>Inventory</button>
+                        <button onClick={() => setActiveTab('bulk-upload')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'bulk-upload' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}>Bulk Upload</button>
+                        <button onClick={() => setActiveTab('reports')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'reports' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}>Reports</button>
                     </nav>
                 </div>
+
                 {activeTab === 'overview' && renderOverview()}
                 {activeTab === 'reps' && renderRepsTab()}
                 {activeTab === 'inventory' && renderInventoryTab()}
