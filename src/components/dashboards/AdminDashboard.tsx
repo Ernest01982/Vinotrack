@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Users, BarChart3, Wine, TrendingUp, Package, UserPlus, Mail, Upload, FileSpreadsheet, CheckCircle, AlertCircle, Calendar } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../ui/Button';
@@ -13,31 +13,52 @@ export const AdminDashboard: React.FC = () => {
     const { userProfile } = useAuth();
     const [activeTab, setActiveTab] = useState('overview');
 
-    // Use custom hooks for data fetching
+    // Data hooks
     const { users: reps, loading: repsLoading, error: repsError, refetch: refetchReps } = useUsers();
     const { products, loading: productsLoading, error: productsError, refetch: refetchProducts } = useProducts();
 
+    // UI State
     const [inviteLoading, setInviteLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
-
-    // Product management state
     const [showAddProductModal, setShowAddProductModal] = useState(false);
+    
+    // Form State
     const [productForm, setProductForm] = useState({ name: '', description: '', price: '' });
-    const [productLoading, setProductLoading] = useState(false);
+    const [inviteForm, setInviteForm] = useState({ email: '', fullName: '', role: 'Rep' as 'Rep' | 'Admin' });
 
-    // Bulk upload state
+    // Bulk Upload State
     const [uploadFile, setUploadFile] = useState<File | null>(null);
     const [uploadType, setUploadType] = useState('Products');
     const [uploadLoading, setUploadLoading] = useState(false);
     const [uploadResults, setUploadResults] = useState<{ success: number; errors: string[]; total: number; } | null>(null);
 
-    // Reports state
-    const [reportStats, setReportStats] = useState<{ totalClients: number; totalProducts: number; newProducts: number; visitsToday: number; visitsWeek: number; visitsMonth: number; onConsumptionVisits: number; offConsumptionVisits: number; repVisitStats: Array<{ rep_id: string; rep_name: string; total_visits: number; avg_duration_minutes: number; }>; } | null>(null);
-    const [reportsLoading, setReportsLoading] = useState(false);
+    // Reports State
+    const [reportStats, setReportStats] = useState<any | null>(null);
+    const [reportsLoading, setReportsLoading] = useState(true);
 
-    // Form state for inviting new reps
-    const [inviteForm, setInviteForm] = useState({ email: '', fullName: '', role: 'Rep' as 'Rep' | 'Admin' });
+    // Fetch reports on initial load and when the tab is active
+    const fetchReports = useCallback(async () => {
+        setReportsLoading(true);
+        setError('');
+        try {
+            const { data, error } = await supabase.rpc('get_dashboard_analytics');
+            if (error) throw error;
+            setReportStats(data);
+        } catch (err: any) {
+            console.error('Error fetching reports:', err);
+            setError('Failed to fetch reports. Ensure the database function is set up.');
+        } finally {
+            setReportsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (activeTab === 'overview' || activeTab === 'reports') {
+            fetchReports();
+        }
+    }, [activeTab, fetchReports]);
+
 
     useEffect(() => {
         if (repsError) setError(repsError);
@@ -55,8 +76,6 @@ export const AdminDashboard: React.FC = () => {
             if (!emailRegex.test(inviteForm.email)) throw new Error('Please enter a valid email address.');
             if (!inviteForm.fullName.trim()) throw new Error('Full name is required.');
 
-            // **SECURITY FIX**: Use `inviteUserByEmail` instead of `signUp`.
-            // This sends a secure invitation link and lets the user set their own password.
             const { data, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
                 inviteForm.email,
                 { data: { full_name: inviteForm.fullName, role: inviteForm.role } }
@@ -64,16 +83,13 @@ export const AdminDashboard: React.FC = () => {
 
             if (inviteError) throw inviteError;
             
-            // The trigger `handle_new_user` in your Supabase setup will create the profile.
-            // We just need to ensure the role is set correctly if it differs from the default.
             if (data.user && data.user.id) {
-                const { error: profileUpdateError } = await supabase
+                 const { error: profileUpdateError } = await supabase
                     .from('profiles')
                     .update({ role: inviteForm.role, full_name: inviteForm.fullName })
                     .eq('id', data.user.id);
                 
                 if (profileUpdateError) {
-                   // Even if profile update fails, the invite was sent. Inform the admin.
                    console.error("Profile update failed:", profileUpdateError);
                    setError(`Invite sent to ${inviteForm.email}, but failed to update profile role. Please set it manually.`);
                 } else {
@@ -82,7 +98,7 @@ export const AdminDashboard: React.FC = () => {
             }
             
             setInviteForm({ email: '', fullName: '', role: 'Rep' });
-            refetchReps(); // Refetch users list
+            refetchReps();
         } catch (err: any) {
             console.error('Invite error:', err);
             setError(err.message || 'Failed to send invite.');
@@ -91,8 +107,6 @@ export const AdminDashboard: React.FC = () => {
         }
     };
     
-    // ... (rest of the file remains the same, only the handleInviteRep function is changed)
-
     const handleAddProduct = async (e: React.FormEvent) => {
         e.preventDefault();
         setProductLoading(true);
@@ -114,7 +128,7 @@ export const AdminDashboard: React.FC = () => {
             setSuccess('Product added successfully!');
             setProductForm({ name: '', description: '', price: '' });
             setShowAddProductModal(false);
-            refetchProducts(); // Refetch products list
+            refetchProducts();
         } catch (err: any) {
             console.error('Add product error:', err);
             setError(err.message || 'Failed to add product');
@@ -174,65 +188,13 @@ export const AdminDashboard: React.FC = () => {
             setUploadLoading(false);
         }
     };
-
-    const fetchReports = async () => {
-        setReportsLoading(true);
-        try {
-            const [clientsRes, productsRes, visitsRes] = await Promise.all([
-                supabase.from('clients').select('id, consumption_type'),
-                supabase.from('products').select('id, created_at'),
-                supabase.from('visits').select('id, start_time, end_time, rep_id, profiles!visits_rep_id_fkey(full_name)')
-            ]);
-
-            const totalClients = clientsRes.data?.length || 0;
-            const totalProducts = productsRes.data?.length || 0;
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-            const newProducts = productsRes.data?.filter(p => new Date(p.created_at) > thirtyDaysAgo).length || 0;
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const weekAgo = new Date();
-            weekAgo.setDate(weekAgo.getDate() - 7);
-            const monthAgo = new Date();
-            monthAgo.setDate(monthAgo.getDate() - 30);
-            const visits = visitsRes.data || [];
-            const visitsToday = visits.filter(v => new Date(v.start_time) >= today).length;
-            const visitsWeek = visits.filter(v => new Date(v.start_time) >= weekAgo).length;
-            const visitsMonth = visits.filter(v => new Date(v.start_time) >= monthAgo).length;
-            const clients = clientsRes.data || [];
-            const onConsumptionVisits = clients.filter(c => c.consumption_type === 'on-consumption').length;
-            const offConsumptionVisits = clients.filter(c => c.consumption_type === 'off-consumption').length;
-            const repVisitStats = visits.reduce((acc: any[], visit) => {
-                const repId = visit.rep_id;
-                const repName = (visit.profiles as any)?.full_name || 'Unknown';
-                let repStat = acc.find(r => r.rep_id === repId);
-                if (!repStat) {
-                    repStat = { rep_id: repId, rep_name: repName, total_visits: 0, avg_duration_minutes: 0, total_duration: 0 };
-                    acc.push(repStat);
-                }
-                repStat.total_visits++;
-                if (visit.end_time) {
-                    const duration = new Date(visit.end_time).getTime() - new Date(visit.start_time).getTime();
-                    repStat.total_duration += duration;
-                    repStat.avg_duration_minutes = Math.round(repStat.total_duration / repStat.total_visits / 60000);
-                }
-                return acc;
-            }, []);
-
-            setReportStats({ totalClients, totalProducts, newProducts, visitsToday, visitsWeek, visitsMonth, onConsumptionVisits, offConsumptionVisits, repVisitStats });
-        } catch (err) {
-            console.error('Error fetching reports:', err);
-            setError('Failed to fetch reports');
-        } finally {
-            setReportsLoading(false);
-        }
-    };
     
+    // JSX Rendering functions for each tab
     const renderOverview = () => {
         const stats = [
             { name: 'Total Users', value: reps.length.toString(), icon: Users },
             { name: 'Total Products', value: products.length.toString(), icon: Wine },
-            { name: 'Visits Today', value: reportStats?.visitsToday?.toString() || 'N/A', icon: Calendar },
+            { name: 'Visits Today', value: reportStats?.visitsToday?.toString() ?? '...', icon: Calendar },
             { name: 'Active Reps', value: reps.filter(r => r.role === 'Rep').length.toString(), icon: Package },
         ];
         
@@ -253,162 +215,191 @@ export const AdminDashboard: React.FC = () => {
             );
         };
     
-        const renderRepsTab = () => (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div className="md:col-span-2 bg-gray-800 rounded-lg p-6">
-                    <h3 className="text-xl font-semibold text-white mb-4">Manage Users</h3>
-                    {repsLoading ? <p>Loading users...</p> : (
-                        <ul className="space-y-4">
-                            {reps.map(rep => (
-                                <li key={rep.id} className="flex justify-between items-center bg-gray-700 p-4 rounded-lg">
-                                    <div>
-                                        <p className="font-medium text-white">{rep.full_name}</p>
-                                        <p className="text-sm text-gray-400">{rep.email} - <span className="font-semibold">{rep.role}</span></p>
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </div>
-                <div className="bg-gray-800 rounded-lg p-6">
-                    <h3 className="text-xl font-semibold text-white mb-4">Invite New User</h3>
-                    <form onSubmit={handleInviteRep} className="space-y-4">
-                        <Input label="Full Name" value={inviteForm.fullName} onChange={e => setInviteForm({...inviteForm, fullName: e.target.value})} placeholder="e.g., Jane Doe" required />
-                        <Input label="Email" type="email" value={inviteForm.email} onChange={e => setInviteForm({...inviteForm, email: e.target.value})} placeholder="e.g., rep@example.com" required />
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300">Role</label>
-                            <select value={inviteForm.role} onChange={e => setInviteForm({...inviteForm, role: e.target.value as 'Rep' | 'Admin'})} className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white">
-                                <option value="Rep">Rep</option>
-                                <option value="Admin">Admin</option>
-                            </select>
-                        </div>
-                        <Button type="submit" loading={inviteLoading} className="w-full">
-                            <Mail className="h-4 w-4 mr-2" /> Send Invite
-                        </Button>
-                    </form>
-                </div>
-            </div>
-        );
-        
-        const renderInventoryTab = () => (
-            <div className="space-y-6">
-                <div className="flex justify-between items-center">
-                    <h3 className="text-xl font-semibold text-white">Product Inventory</h3>
-                    <Button onClick={() => setShowAddProductModal(true)}>Add Product</Button>
-                </div>
-                {productsLoading ? <p>Loading products...</p> : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {products.map(product => (
-                            <div key={product.id} className="bg-gray-800 rounded-lg p-4">
-                                <h4 className="font-bold text-white">{product.name}</h4>
-                                <p className="text-gray-400 text-sm">{product.description}</p>
-                                <p className="text-lg font-semibold text-purple-400 mt-2">R{product.price.toFixed(2)}</p>
-                            </div>
-                        ))}
-                    </div>
-                )}
-                {/* Add Product Modal */}
-                {showAddProductModal && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-                        <div className="bg-gray-800 rounded-lg p-8 w-full max-w-md">
-                            <h3 className="text-xl font-semibold text-white mb-4">Add New Product</h3>
-                            <form onSubmit={handleAddProduct} className="space-y-4">
-                                <Input label="Product Name" value={productForm.name} onChange={e => setProductForm({...productForm, name: e.target.value})} required />
-                                <Input label="Description" value={productForm.description} onChange={e => setProductForm({...productForm, description: e.target.value})} required />
-                                <Input label="Price" type="number" value={productForm.price} onChange={e => setProductForm({...productForm, price: e.target.value})} required />
-                                <div className="flex justify-end space-x-4">
-                                    <Button type="button" variant="secondary" onClick={() => setShowAddProductModal(false)}>Cancel</Button>
-                                    <Button type="submit" loading={productLoading}>Save Product</Button>
+    const renderRepsTab = () => (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="md:col-span-2 bg-gray-800 rounded-lg p-6">
+                <h3 className="text-xl font-semibold text-white mb-4">Manage Users</h3>
+                {repsLoading ? <p>Loading users...</p> : (
+                    <ul className="space-y-4">
+                        {reps.map(rep => (
+                            <li key={rep.id} className="flex justify-between items-center bg-gray-700 p-4 rounded-lg">
+                                <div>
+                                    <p className="font-medium text-white">{rep.full_name}</p>
+                                    <p className="text-sm text-gray-400">{rep.email} - <span className="font-semibold">{rep.role}</span></p>
                                 </div>
-                            </form>
-                        </div>
-                    </div>
+                            </li>
+                        ))}
+                    </ul>
                 )}
             </div>
-        );
-    
-        const renderBulkUploadTab = () => (
             <div className="bg-gray-800 rounded-lg p-6">
-                <h3 className="text-xl font-semibold text-white mb-4">Bulk Upload</h3>
-                <div className="space-y-4">
+                <h3 className="text-xl font-semibold text-white mb-4">Invite New User</h3>
+                <form onSubmit={handleInviteRep} className="space-y-4">
+                    <Input label="Full Name" value={inviteForm.fullName} onChange={e => setInviteForm({...inviteForm, fullName: e.target.value})} placeholder="e.g., Jane Doe" required />
+                    <Input label="Email" type="email" value={inviteForm.email} onChange={e => setInviteForm({...inviteForm, email: e.target.value})} placeholder="e.g., rep@example.com" required />
                     <div>
-                        <label className="block text-sm font-medium text-gray-300">Upload Type</label>
-                        <select value={uploadType} onChange={e => setUploadType(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white">
-                            <option>Products</option>
-                            <option>Clients</option>
+                        <label className="block text-sm font-medium text-gray-300">Role</label>
+                        <select value={inviteForm.role} onChange={e => setInviteForm({...inviteForm, role: e.target.value as 'Rep' | 'Admin'})} className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white">
+                            <option value="Rep">Rep</option>
+                            <option value="Admin">Admin</option>
                         </select>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300">Upload File (CSV or XLSX)</label>
-                        <Input type="file" accept=".csv, .xlsx" onChange={e => setUploadFile(e.target.files ? e.target.files[0] : null)} />
-                    </div>
-                    <Button onClick={handleFileUpload} loading={uploadLoading} disabled={!uploadFile}>
-                        <Upload className="h-4 w-4 mr-2" /> Upload
+                    <Button type="submit" loading={inviteLoading} className="w-full">
+                        <Mail className="h-4 w-4 mr-2" /> Send Invite
                     </Button>
-                </div>
-                {uploadResults && (
-                    <div className="mt-6">
-                        <h4 className="font-semibold text-white">Upload Results</h4>
-                        <p className="text-gray-300">Total Rows: {uploadResults.total}</p>
-                        <p className="text-green-400">Successfully Uploaded: {uploadResults.success}</p>
-                        {uploadResults.errors.length > 0 && (
-                            <div>
-                                <p className="text-red-400">Errors: {uploadResults.errors.length}</p>
-                                <ul className="list-disc list-inside text-red-400 text-sm">
-                                    {uploadResults.errors.slice(0, 10).map((err, i) => <li key={i}>{err}</li>)}
-                                    {uploadResults.errors.length > 10 && <li>...and {uploadResults.errors.length - 10} more.</li>}
-                                </ul>
-                            </div>
-                        )}
-                    </div>
-                )}
+                </form>
             </div>
-        );
+        </div>
+    );
         
-        const renderReportsTab = () => {
-            useEffect(() => {
-                fetchReports();
-            }, []);
-    
-            if (reportsLoading) return <p>Loading reports...</p>;
-            if (!reportStats) return <p>No report data available.</p>;
-    
-            return (
-                <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="bg-gray-800 p-4 rounded-lg"><p className="text-gray-400">Total Clients</p><p className="text-2xl font-bold">{reportStats.totalClients}</p></div>
-                        <div className="bg-gray-800 p-4 rounded-lg"><p className="text-gray-400">Total Products</p><p className="text-2xl font-bold">{reportStats.totalProducts}</p></div>
-                        <div className="bg-gray-800 p-4 rounded-lg"><p className="text-gray-400">New Products (30d)</p><p className="text-2xl font-bold">{reportStats.newProducts}</p></div>
-                    </div>
-                    {/* Add more report visualizations here */}
+    const renderInventoryTab = () => (
+        <div className="space-y-6">
+            <div className="flex justify-between items-center">
+                <h3 className="text-xl font-semibold text-white">Product Inventory</h3>
+                <Button onClick={() => setShowAddProductModal(true)}>Add Product</Button>
+            </div>
+            {productsLoading ? <p>Loading products...</p> : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {products.map(product => (
+                        <div key={product.id} className="bg-gray-800 rounded-lg p-4">
+                            <h4 className="font-bold text-white">{product.name}</h4>
+                            <p className="text-gray-400 text-sm">{product.description}</p>
+                            <p className="text-lg font-semibold text-purple-400 mt-2">R{product.price.toFixed(2)}</p>
+                        </div>
+                    ))}
                 </div>
-            );
-        };
+            )}
+            {showAddProductModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                    <div className="bg-gray-800 rounded-lg p-8 w-full max-w-md">
+                        <h3 className="text-xl font-semibold text-white mb-4">Add New Product</h3>
+                        <form onSubmit={handleAddProduct} className="space-y-4">
+                            <Input label="Product Name" value={productForm.name} onChange={e => setProductForm({...productForm, name: e.target.value})} required />
+                            <Input label="Description" value={productForm.description} onChange={e => setProductForm({...productForm, description: e.target.value})} required />
+                            <Input label="Price" type="number" step="0.01" value={productForm.price} onChange={e => setProductForm({...productForm, price: e.target.value})} required />
+                            <div className="flex justify-end space-x-4">
+                                <Button type="button" variant="secondary" onClick={() => setShowAddProductModal(false)}>Cancel</Button>
+                                <Button type="submit" loading={productLoading}>Save Product</Button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
     
+    const renderBulkUploadTab = () => (
+        <div className="bg-gray-800 rounded-lg p-6">
+            <h3 className="text-xl font-semibold text-white mb-4">Bulk Upload</h3>
+            <div className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Upload Type</label>
+                    <select value={uploadType} onChange={e => setUploadType(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white">
+                        <option>Products</option>
+                        <option>Clients</option>
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Upload File (CSV or XLSX)</label>
+                    <Input type="file" accept=".csv, .xlsx" onChange={e => setUploadFile(e.target.files ? e.target.files[0] : null)} />
+                </div>
+                <Button onClick={handleFileUpload} loading={uploadLoading} disabled={!uploadFile}>
+                    <Upload className="h-4 w-4 mr-2" /> Upload
+                </Button>
+            </div>
+            {uploadResults && (
+                <div className="mt-6">
+                    <h4 className="font-semibold text-white">Upload Results</h4>
+                    <p className="text-gray-300">Total Rows: {uploadResults.total}</p>
+                    <p className="text-green-400">Successfully Uploaded: {uploadResults.success}</p>
+                    {uploadResults.errors.length > 0 && (
+                        <div>
+                            <p className="text-red-400">Errors: {uploadResults.errors.length}</p>
+                            <ul className="list-disc list-inside text-red-400 text-sm">
+                                {uploadResults.errors.slice(0, 10).map((err, i) => <li key={i}>{err}</li>)}
+                                {uploadResults.errors.length > 10 && <li>...and {uploadResults.errors.length - 10} more.</li>}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+        
+    const renderReportsTab = () => {
+        if (reportsLoading) return <div className="text-center py-12"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div><p className="mt-4 text-gray-400">Loading reports...</p></div>;
+        if (!reportStats) return <div className="text-center py-12"><AlertCircle className="mx-auto h-12 w-12 text-red-400" /><p className="mt-4 text-gray-400">Could not load report data.</p><Button onClick={fetchReports} className="mt-4">Try Again</Button></div>;
+
         return (
-            <div className="min-h-screen bg-gray-900">
-                {error && (<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4"><div className="bg-red-800 border border-red-600 text-red-200 px-4 py-3 rounded">{error}</div></div>)}
-                {success && (<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4"><div className="bg-green-800 border border-green-600 text-green-200 px-4 py-3 rounded">{success}</div></div>)}
-                <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                    <div className="mb-8">
-                        <h2 className="text-3xl font-bold text-white">Admin Dashboard</h2>
-                        <p className="text-gray-400">Welcome, {userProfile?.full_name}</p>
+            <div className="space-y-8">
+                <div>
+                    <h3 className="text-xl font-semibold text-white mb-4">High-Level Stats</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                        <div className="bg-gray-800 p-4 rounded-lg text-center"><p className="text-gray-400">Total Clients</p><p className="text-3xl font-bold">{reportStats.totalClients}</p></div>
+                        <div className="bg-gray-800 p-4 rounded-lg text-center"><p className="text-gray-400">Total Products</p><p className="text-3xl font-bold">{reportStats.totalProducts}</p></div>
+                        <div className="bg-gray-800 p-4 rounded-lg text-center"><p className="text-gray-400">On-Consumption</p><p className="text-3xl font-bold">{reportStats.onConsumptionVisits}</p></div>
+                        <div className="bg-gray-800 p-4 rounded-lg text-center"><p className="text-gray-400">Off-Consumption</p><p className="text-3xl font-bold">{reportStats.offConsumptionVisits}</p></div>
                     </div>
-                    <div className="border-b border-gray-700 mb-8">
-                        <nav className="flex space-x-8">
-                            <button onClick={() => setActiveTab('overview')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'overview' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Overview</button>
-                            <button onClick={() => setActiveTab('reps')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'reps' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Users</button>
-                            <button onClick={() => setActiveTab('inventory')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'inventory' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Inventory</button>
-                            <button onClick={() => setActiveTab('bulk-upload')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'bulk-upload' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Bulk Upload</button>
-                            <button onClick={() => setActiveTab('reports')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'reports' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Reports</button>
-                        </nav>
+                </div>
+                <div>
+                    <h3 className="text-xl font-semibold text-white mb-4">Visit Activity</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-gray-800 p-4 rounded-lg text-center"><p className="text-gray-400">Visits Today</p><p className="text-3xl font-bold">{reportStats.visitsToday}</p></div>
+                        <div className="bg-gray-800 p-4 rounded-lg text-center"><p className="text-gray-400">Visits This Week</p><p className="text-3xl font-bold">{reportStats.visitsWeek}</p></div>
+                        <div className="bg-gray-800 p-4 rounded-lg text-center"><p className="text-gray-400">Visits This Month</p><p className="text-3xl font-bold">{reportStats.visitsMonth}</p></div>
                     </div>
-                    {activeTab === 'overview' && renderOverview()}
-                    {activeTab === 'reps' && renderRepsTab()}
-                    {activeTab === 'inventory' && renderInventoryTab()}
-                    {activeTab === 'bulk-upload' && renderBulkUploadTab()}
-                    {activeTab === 'reports' && renderReportsTab()}
-                </main>
+                </div>
+                <div>
+                    <h3 className="text-xl font-semibold text-white mb-4">Rep Performance</h3>
+                    <div className="bg-gray-800 rounded-lg overflow-hidden">
+                        <table className="min-w-full">
+                            <thead className="bg-gray-700">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Rep Name</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Total Visits</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Avg. Duration (Mins)</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {reportStats.repVisitStats.map((rep: any) => (
+                                    <tr key={rep.rep_id} className="hover:bg-gray-700">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{rep.rep_name}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{rep.total_visits}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{rep.avg_duration_minutes}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         );
+    };
+    
+    return (
+        <div className="min-h-screen bg-gray-900">
+            {error && (<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4"><div className="bg-red-800 border border-red-600 text-red-200 px-4 py-3 rounded">{error}</div></div>)}
+            {success && (<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4"><div className="bg-green-800 border border-green-600 text-green-200 px-4 py-3 rounded">{success}</div></div>)}
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div className="mb-8">
+                    <h2 className="text-3xl font-bold text-white">Admin Dashboard</h2>
+                    <p className="text-gray-400">Welcome, {userProfile?.full_name}</p>
+                </div>
+                <div className="border-b border-gray-700 mb-8">
+                    <nav className="flex space-x-8">
+                        <button onClick={() => setActiveTab('overview')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'overview' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Overview</button>
+                        <button onClick={() => setActiveTab('reps')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'reps' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Users</button>
+                        <button onClick={() => setActiveTab('inventory')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'inventory' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Inventory</button>
+                        <button onClick={() => setActiveTab('bulk-upload')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'bulk-upload' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Bulk Upload</button>
+                        <button onClick={() => setActiveTab('reports')} className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'reports' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'}`}>Reports</button>
+                    </nav>
+                </div>
+                {activeTab === 'overview' && renderOverview()}
+                {activeTab === 'reps' && renderRepsTab()}
+                {activeTab === 'inventory' && renderInventoryTab()}
+                {activeTab === 'bulk-upload' && renderBulkUploadTab()}
+                {activeTab === 'reports' && renderReportsTab()}
+            </main>
+        </div>
+    );
 };
