@@ -3,17 +3,15 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { ActiveVisitScreen } from './ActiveVisitScreen';
 import { Button } from '../ui/Button';
-import { User, MapPin, Phone, Mail, Clock, PlusCircle, LogOut, AlertTriangle, CheckCircle, ChevronRight, Star } from 'lucide-react';
+import { MapPin, Phone, Mail, PlusCircle, LogOut, AlertTriangle, CheckCircle, Star } from 'lucide-react';
 import type { Client, Visit } from '../../types';
 
-// Define a more specific type for the client object when it includes visit data
 type ClientWithVisits = Client & {
   visits: Array<{ start_time: string }>;
 };
 
-
 const RepDashboard: React.FC = () => {
-  const { user, userProfile, signOut } = useAuth();
+  const { user, userProfile, signOut, loading: authLoading } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
   const [activeVisit, setActiveVisit] = useState<Visit | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -21,15 +19,28 @@ const RepDashboard: React.FC = () => {
   const [error, setError] = useState('');
   const [locationError, setLocationError] = useState('');
 
-  // Fetch initial data on component mount
+  // Combined effect to check for active visits from localStorage or Supabase
   useEffect(() => {
-    if (user) {
-      fetchClients(user.id);
+    if (authLoading || !user) return; // Wait for auth to be ready
+
+    // 1. Check localStorage first for a seamless refresh experience
+    const storedVisit = localStorage.getItem('activeVisit');
+    const storedClient = localStorage.getItem('activeClient');
+
+    if (storedVisit && storedClient) {
+      setActiveVisit(JSON.parse(storedVisit));
+      setSelectedClient(JSON.parse(storedClient));
+      setLoading(false);
+    } else {
+      // 2. If nothing in localStorage, check the database for an unfinished visit
       checkActiveVisit(user.id);
     }
-  }, [user]);
+    
+    // 3. Always fetch the latest client list
+    fetchClients(user.id);
 
-  // Fetch clients assigned to the current rep
+  }, [authLoading, user]);
+
   const fetchClients = async (repId: string) => {
     setLoading(true);
     setError('');
@@ -46,7 +57,6 @@ const RepDashboard: React.FC = () => {
         const last_visit_date = visits.length > 0
           ? visits.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())[0].start_time
           : undefined;
-        // Return the original client shape, but with last_visit_date added
         const { visits: _, ...clientData } = client;
         return { ...clientData, last_visit_date };
       });
@@ -60,7 +70,6 @@ const RepDashboard: React.FC = () => {
     }
   };
 
-  // Check for an existing active visit
   const checkActiveVisit = async (repId: string) => {
     try {
       const { data, error } = await supabase
@@ -70,11 +79,16 @@ const RepDashboard: React.FC = () => {
         .is('end_time', null)
         .single();
 
-      if (error && error.code !== 'PGRST116') throw error; // Ignore "No rows found"
+      if (error && error.code !== 'PGRST116') throw error;
 
       if (data) {
-        setActiveVisit(data as Visit); // Cast to the correct Visit type
-        setSelectedClient(data.clients as Client); // Cast to the correct Client type
+        const visit = data as Visit;
+        const client = data.clients as Client;
+        // Store the found visit in localStorage
+        localStorage.setItem('activeVisit', JSON.stringify(visit));
+        localStorage.setItem('activeClient', JSON.stringify(client));
+        setActiveVisit(visit);
+        setSelectedClient(client);
       }
     } catch (err: any) {
       setError('Failed to check for active visits.');
@@ -82,7 +96,6 @@ const RepDashboard: React.FC = () => {
     }
   };
 
-  // Start a new visit
   const handleStartVisit = (client: Client) => {
     setLocationError('');
     if (!navigator.geolocation) {
@@ -106,8 +119,13 @@ const RepDashboard: React.FC = () => {
             .single();
 
           if (error) throw error;
-
-          setActiveVisit(data);
+          
+          const newVisit = data as Visit;
+          // Store in localStorage when visit starts
+          localStorage.setItem('activeVisit', JSON.stringify(newVisit));
+          localStorage.setItem('activeClient', JSON.stringify(client));
+          
+          setActiveVisit(newVisit);
           setSelectedClient(client);
         } catch (err: any) {
           setError('Failed to start visit.');
@@ -122,8 +140,7 @@ const RepDashboard: React.FC = () => {
       }
     );
   };
-
-  // End the current visit
+  
   const handleEndVisit = async () => {
     if (!activeVisit) return;
     setLoading(true);
@@ -135,9 +152,15 @@ const RepDashboard: React.FC = () => {
 
       if (error) throw error;
 
+      // Clear from localStorage on end
+      localStorage.removeItem('activeVisit');
+      localStorage.removeItem('activeClient');
+      localStorage.removeItem('visitNotes');
+      localStorage.removeItem('orderItems');
+
       setActiveVisit(null);
       setSelectedClient(null);
-      if (user) fetchClients(user.id); // Refresh client list to update visit status
+      if (user) fetchClients(user.id);
     } catch (err: any) {
       setError('Failed to end visit.');
       console.error('End visit error:', err);
@@ -146,7 +169,6 @@ const RepDashboard: React.FC = () => {
     }
   };
 
-  // Client prioritization logic
   const prioritizedClients = useMemo(() => {
     const now = new Date();
     return clients
@@ -164,7 +186,7 @@ const RepDashboard: React.FC = () => {
             priority = 'medium';
           }
         } else {
-          priority = 'high'; // New clients are high priority
+          priority = 'high';
         }
         return { ...client, priority, daysSinceLastVisit };
       })
@@ -177,7 +199,6 @@ const RepDashboard: React.FC = () => {
       });
   }, [clients]);
 
-  // Render active visit screen
   if (activeVisit && selectedClient) {
     return (
       <ActiveVisitScreen
@@ -185,6 +206,9 @@ const RepDashboard: React.FC = () => {
         client={selectedClient}
         onEndVisit={handleEndVisit}
         onBack={() => {
+          // This should ideally not be used if a visit is active, but as a safeguard:
+          localStorage.removeItem('activeVisit');
+          localStorage.removeItem('activeClient');
           setActiveVisit(null);
           setSelectedClient(null);
         }}
@@ -192,7 +216,6 @@ const RepDashboard: React.FC = () => {
     );
   }
 
-  // Main dashboard view
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <header className="bg-gray-800 shadow-md">
