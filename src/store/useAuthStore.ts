@@ -85,6 +85,11 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   signOut: async () => {
     await supabase.auth.signOut();
+    // Clear visit state from localStorage on sign out
+    localStorage.removeItem('activeVisit');
+    localStorage.removeItem('activeClient');
+    localStorage.removeItem('visitNotes');
+    localStorage.removeItem('orderItems');
     set({ user: null, userProfile: null, session: null });
   },
 
@@ -92,4 +97,3 @@ export const useAuthStore = create<AuthState>((set) => ({
     return supabase.auth.resetPasswordForEmail(email);
   },
 }));
-
