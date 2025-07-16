@@ -6,6 +6,12 @@ import { Button } from '../ui/Button';
 import { User, MapPin, Phone, Mail, Clock, PlusCircle, LogOut, AlertTriangle, CheckCircle, ChevronRight, Star } from 'lucide-react';
 import type { Client, Visit } from '../../types';
 
+// Define a more specific type for the client object when it includes visit data
+type ClientWithVisits = Client & {
+  visits: Array<{ start_time: string }>;
+};
+
+
 const RepDashboard: React.FC = () => {
   const { user, userProfile, signOut } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
@@ -34,13 +40,15 @@ const RepDashboard: React.FC = () => {
         .eq('assigned_rep_id', repId);
 
       if (error) throw error;
-
-      const clientsWithLastVisit = data.map(client => {
-        const visits = (client.visits as any[]) || [];
+      
+      const clientsWithLastVisit = (data as ClientWithVisits[]).map(client => {
+        const visits = client.visits || [];
         const last_visit_date = visits.length > 0
           ? visits.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())[0].start_time
           : undefined;
-        return { ...client, last_visit_date };
+        // Return the original client shape, but with last_visit_date added
+        const { visits: _, ...clientData } = client;
+        return { ...clientData, last_visit_date };
       });
 
       setClients(clientsWithLastVisit);
@@ -65,8 +73,8 @@ const RepDashboard: React.FC = () => {
       if (error && error.code !== 'PGRST116') throw error; // Ignore "No rows found"
 
       if (data) {
-        setActiveVisit(data as any);
-        setSelectedClient((data as any).clients);
+        setActiveVisit(data as Visit); // Cast to the correct Visit type
+        setSelectedClient(data.clients as Client); // Cast to the correct Client type
       }
     } catch (err: any) {
       setError('Failed to check for active visits.');
