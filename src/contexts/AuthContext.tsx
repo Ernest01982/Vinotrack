@@ -1,64 +1,73 @@
-import React, { useState } from 'react';
-import AuthProvider, { useAuth } from './contexts/AuthContext'; // <-- IMPORT UPDATED HERE
-import { AdminDashboard } from './components/dashboards/AdminDashboard';
-import RepDashboard from './components/dashboards/RepDashboard';
-import { LoginForm } from './components/auth/LoginForm';
-import { ForgotPasswordForm } from './components/auth/ForgotPasswordForm';
-import { Button } from './components/ui/Button';
+import React, { createContext, useContext, useEffect, FC, ReactNode } from 'react';
+import { useAuthStore } from '../store/useAuthStore';
+import type { User, Session } from '@supabase/supabase-js';
+import type { UserProfile } from '../types';
 
-const AppContent: React.FC = () => {
-  const { user, userProfile, loading, signOut } = useAuth();
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
-
-  // Initial loading state for the whole application
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-          <div className="space-y-2">
-            <p className="text-white text-lg font-medium">VinoTracker</p>
-            <p className="text-gray-400">Initializing application...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // If there's no user, direct to authentication
-  if (!user) {
-    return showForgotPassword
-      ? <ForgotPasswordForm onBack={() => setShowForgotPassword(false)} />
-      : <LoginForm onForgotPassword={() => setShowForgotPassword(true)} />;
-  }
-
-  // If user is logged in, but the profile is missing (error state)
-  if (!userProfile) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center text-center">
-        <div>
-          <h2 className="text-2xl font-bold text-white mb-2">Profile Error</h2>
-          <p className="text-gray-400 mb-6 max-w-sm">
-            We couldn't load your user profile. This can happen if the profile is missing or due to a network issue. Please try signing out and back in, or contact support if the problem persists.
-          </p>
-          <Button onClick={signOut} variant="secondary" size="lg">
-            Sign Out
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // User and profile are loaded, show the correct dashboard
-  return userProfile.role === 'Admin' ? <AdminDashboard /> : <RepDashboard />;
-};
-
-function App() {
-  return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  );
+// Define the shape of the context's value
+interface AuthContextValue {
+  user: User | null;
+  userProfile: UserProfile | null;
+  session: Session | null;
+  loading: boolean;
+  signOut: () => Promise<void>;
+  signIn: (email: string, password: string) => Promise<{ error: any | null }>;
+  resetPassword: (email: string) => Promise<{ error: any | null }>;
 }
 
-export default App;
+// Create the context with a default undefined value
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+// The AuthProvider component that will wrap your application
+export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
+  const {
+    user,
+    userProfile,
+    session,
+    loading,
+    checkSession,
+    setupListener,
+    signOut,
+    signIn,
+    resetPassword,
+  } = useAuthStore();
+
+  useEffect(() => {
+    // On initial load, check for an existing session
+    checkSession();
+
+    // Set up the real-time auth state listener and get the unsubscribe function
+    const unsubscribe = setupListener();
+
+    // Cleanup: unsubscribe from the listener when the component unmounts
+    return () => {
+      unsubscribe();
+    };
+  }, [checkSession, setupListener]);
+
+  const value: AuthContextValue = {
+    user,
+    userProfile,
+    session,
+    loading,
+    signOut,
+    signIn,
+    resetPassword,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+// Custom hook to easily access the auth context
+export const useAuth = (): AuthContextValue => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+export default AuthProvider;
